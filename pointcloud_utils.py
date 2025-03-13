@@ -81,7 +81,7 @@ def process_point_cloud(filename, param):
     )
     # set the exploration target using the 'red' channel of the point cloud
     u0 = colors[:, 0]
-    pcloud.u0 = np.where(u0 < 1, 0, 255)
+    pcloud.u0 = u0 #np.where(u0 < 1, 0, 255)
     # compute the K-D tree for the nearest neighbor queries later
     pcloud.pcd_tree = o3d.geometry.KDTreeFlann(pcd)
 

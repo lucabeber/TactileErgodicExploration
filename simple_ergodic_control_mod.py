@@ -55,14 +55,50 @@ def hedac(agent, param, pcloud):
     """
     coverage_arr = np.zeros((len(pcloud.vertices), param.timesteps))
     heat_arr = np.zeros_like(coverage_arr)
+    
+    # Initialize goal density
+    sample_points = torch.tensor(agent.x, dtype=torch.float32).reshape(1, -1)
+    # Make prediction
+    with torch.no_grad(), gpytorch.settings.fast_pred_var():
+        gpr_original_density = likelihood_real(model_real(sample_points))
+
+    density_sample = gpr_original_density.mean.cpu()
+    # print(stiffness_sample)
+    # Construct training data
+    train_x = sample_points.clone()
+    train_y = density_sample.clone()
+    print(train_x)
+    print(train_y)
+
+    likelihood = gpytorch.likelihoods.GaussianLikelihood()
+    model = GPModel(train_x, train_y, likelihood)
+
+    # Training the model
+    model.train()
+    likelihood.train()
+
+    # Load parameters from the saved model
+    model.load_state_dict(torch.load("model_state.pth"))
+    likelihood.load_state_dict(torch.load("likelihood_state.pth"))
+
+    # Switch to evaluation mode
+    model.eval()
+    likelihood.eval()
+
+    test_x = torch.tensor(pcloud.vertices, dtype=torch.float32)
+
+    with torch.no_grad(), gpytorch.settings.fast_pred_var():
+        observed_pred = likelihood(model(test_x))
+
+    goal_density = observed_pred.mean.cpu().numpy()
 
     # we normalize the goal because it should be a probability distribution
-    goal_density = normalize_mat(pcloud.u0) ## change here
+    goal_density = normalize_mat(goal_density) 
+    ut = np.array(goal_density)
 
     # we keep this and add coverage at each timestep on top of it
     coverage = np.zeros_like(goal_density)
-    ut = np.array(goal_density)
-
+    
     # for keeping the runtime of each timestep
     time_arr = np.zeros(param.timesteps)
 
@@ -109,7 +145,64 @@ def hedac(agent, param, pcloud):
 
         coverage_arr[..., t] = coverage
         heat_arr[..., t] = np.copy(ut)
-    return agent.x_arr, heat_arr, coverage_arr, time_arr
+
+        if t % 20 == 0 and t > 0:
+            print(f"Time step: {t}/{param.timesteps}")
+            # Update the goal density
+            # Extract the trajectory
+            sample_points = torch.tensor(agent.x_arr[:t,:] , dtype=torch.float32)
+
+            # Make prediction
+            with torch.no_grad(), gpytorch.settings.fast_pred_var():
+                gpr_original_density = likelihood_real(model_real(sample_points))
+            
+            density_sample = gpr_original_density.mean.cpu()
+
+            # Construct training data
+            train_x = sample_points.clone()
+            train_y = density_sample.clone()
+
+            # Training the model
+            model.train()
+            likelihood.train()
+
+            model.set_train_data(train_x, train_y, strict=False)
+
+            # Switch to evaluation mode
+            model.eval()
+            likelihood.eval()
+
+            test_x = torch.tensor(pcloud.vertices, dtype=torch.float32)
+
+            with torch.no_grad(), gpytorch.settings.fast_pred_var():
+                observed_pred = likelihood(model(test_x))
+            
+            # # Map stiffness to RGB colors using a colormap
+            colormap = cm.get_cmap('viridis')  # Change to 'jet' or other colormaps if needed
+            colors = colormap(observed_pred.mean.cpu().numpy())[:, :3]  # Convert to RGB
+
+            # Create Open3D point cloud object
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
+            pcd.colors = o3d.utility.Vector3dVector(colors)
+
+            # Visualise with Open3D
+            o3d.visualization.draw_geometries([pcd], window_name="Target density")
+
+            goal_density = observed_pred.mean.cpu().numpy()
+            goal_density = normalize_mat(goal_density)
+
+            plots = visualize_point_cloud(
+                pcloud.vertices, 
+                colors=heat_arr[...,0], 
+                # colors=heat_arr[...,-1], 
+                is_show_plot=False, point_size=5
+            )
+            fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
+
+            fig.show()
+
+    return x_arr, heat_arr, coverage_arr, time_arr
 
 point_cloud_dir = "point_clouds/"
 
@@ -170,7 +263,86 @@ A = csc_matrix(pcloud.M + pcloud.dt * pcloud.C)  # Ensure sparse format
 pcloud.A_factorized = splu(A)  # LU factorization
 
 
+# Define the goal density
+# ========================
+import torch
+import gpytorch
+import matplotlib.pyplot as plt
+import open3d as o3d
+import os
+import matplotlib.cm as cm
 
+# Construct training data
+train_x = torch.tensor(pcloud.vertices, dtype=torch.float32)
+train_y = torch.tensor(pcloud.u0, dtype=torch.float32)
+
+
+
+# Define the GP model without derivatives
+class GPModel(gpytorch.models.ExactGP):
+    def __init__(self, train_x, train_y, likelihood_real):
+        super(GPModel, self).__init__(train_x, train_y, likelihood_real)
+        self.mean_module = gpytorch.means.ConstantMean()
+        self.covar_module = gpytorch.kernels.ScaleKernel(gpytorch.kernels.RBFKernel(ard_num_dims=3))
+
+    def forward(self, x):
+        mean_x = self.mean_module(x)
+        covar_x = self.covar_module(x)
+        return gpytorch.distributions.MultivariateNormal(mean_x, covar_x)
+
+likelihood_real = gpytorch.likelihoods.GaussianLikelihood()
+model_real = GPModel(train_x, train_y, likelihood_real)
+
+# Training the model
+model_real.train()
+likelihood_real.train()
+
+model_state_path = "model_state.pth"
+likelihood_state_path = "likelihood_state.pth"
+
+if os.path.exists(model_state_path) and os.path.exists(likelihood_state_path):
+    # Load parameters from the saved model
+    model_real.load_state_dict(torch.load(model_state_path))
+    likelihood_real.load_state_dict(torch.load(likelihood_state_path))
+else:
+    optimizer = torch.optim.Adam(model_real.parameters(), lr=0.5)
+    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood_real, model_real)
+
+    training_iterations = 50
+    for i in range(training_iterations):
+        optimizer.zero_grad()
+        output = model_real(train_x)
+        loss = -mll(output, train_y)
+        loss.backward()
+        optimizer.step()
+        print(f"Iter {i+1}/{training_iterations} - Loss: {loss.item()}")
+
+    # Save parameters
+    torch.save(model_real.state_dict(), model_state_path)
+    torch.save(likelihood_real.state_dict(), likelihood_state_path)
+
+# Switch to evaluation mode
+model_real.eval()
+likelihood_real.eval()
+
+# Plot the predicted density
+with torch.no_grad(), gpytorch.settings.fast_pred_var():
+    test_x = torch.tensor(pcloud.vertices, dtype=torch.float32)
+    observed_pred = likelihood_real(model_real(test_x))
+
+# Map stiffness to RGB colors using a colormap
+colormap = cm.get_cmap('viridis')  # Change to 'jet' or other colormaps if needed
+tmp = observed_pred.mean.cpu().numpy()
+# tmp = tmp/sum(tmp)
+colors = colormap(tmp)[:, :3]  # Convert to RGB
+
+# Create Open3D point cloud object
+pcd = o3d.geometry.PointCloud()
+pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
+pcd.colors = o3d.utility.Vector3dVector(colors)
+
+# Visualise with Open3D
+o3d.visualization.draw_geometries([pcd], window_name="Target density")
 
 agent = SecondOrderAgent(
     x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity,max_acceleration=param.max_acceleration*2
