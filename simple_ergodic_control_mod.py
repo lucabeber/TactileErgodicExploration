@@ -55,6 +55,7 @@ def hedac(agent, param, pcloud):
     """
     coverage_arr = np.zeros((len(pcloud.vertices), param.timesteps))
     heat_arr = np.zeros_like(coverage_arr)
+    goal_density_arr = np.zeros_like(coverage_arr)
     
     # Initialize goal density
     sample_points = torch.tensor(agent.x, dtype=torch.float32).reshape(1, -1)
@@ -145,6 +146,7 @@ def hedac(agent, param, pcloud):
 
         coverage_arr[..., t] = coverage
         heat_arr[..., t] = np.copy(ut)
+        goal_density_arr[..., t] = goal_density
 
         if t % 20 == 0 and t > 0:
             print(f"Time step: {t}/{param.timesteps}")
@@ -178,31 +180,41 @@ def hedac(agent, param, pcloud):
                 observed_pred = likelihood(model(test_x))
             
             # # Map stiffness to RGB colors using a colormap
-            colormap = cm.get_cmap('viridis')  # Change to 'jet' or other colormaps if needed
-            colors = colormap(observed_pred.mean.cpu().numpy())[:, :3]  # Convert to RGB
+            # colormap = cm.get_cmap('jet')  # Change to 'jet' or other colormaps if needed
+            # colors = colormap(observed_pred.mean.cpu().numpy())[:, :3]  # Convert to RGB
 
-            # Create Open3D point cloud object
-            pcd = o3d.geometry.PointCloud()
-            pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
-            pcd.colors = o3d.utility.Vector3dVector(colors)
+            # # Create Open3D point cloud object
+            # pcd = o3d.geometry.PointCloud()
+            # pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
+            # pcd.colors = o3d.utility.Vector3dVector(colors)
 
-            # Visualise with Open3D
-            o3d.visualization.draw_geometries([pcd], window_name="Target density")
+            # # Visualise with Open3D
+            # o3d.visualization.draw_geometries([pcd], window_name="Target density")
 
-            goal_density = observed_pred.mean.cpu().numpy()
-            goal_density = normalize_mat(goal_density)
+            var_tmp = observed_pred.variance.cpu().numpy()
 
-            plots = visualize_point_cloud(
-                pcloud.vertices, 
-                colors=heat_arr[...,0], 
-                # colors=heat_arr[...,-1], 
-                is_show_plot=False, point_size=5
-            )
-            fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
+            goal_density = (normalize_mat(observed_pred.mean.cpu().numpy()))
 
-            fig.show()
+            # plots = visualize_point_cloud(
+            #     pcloud.vertices, 
+            #     colors=goal_density, 
+            #     # colors=heat_arr[...,-1], 
+            #     is_show_plot=False, point_size=5
+            # )
+            # fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
+            # fig.show()
 
-    return x_arr, heat_arr, coverage_arr, time_arr
+            # plots = visualize_point_cloud(
+            #     pcloud.vertices, 
+            #     colors=heat_arr[...,t], 
+            #     # colors=heat_arr[...,-1], 
+            #     is_show_plot=False, point_size=5
+            # )
+            # fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
+
+            # fig.show()
+
+    return agent.x_arr, heat_arr, coverage_arr, time_arr, goal_density_arr
 
 point_cloud_dir = "point_clouds/"
 
@@ -331,18 +343,17 @@ with torch.no_grad(), gpytorch.settings.fast_pred_var():
     observed_pred = likelihood_real(model_real(test_x))
 
 # Map stiffness to RGB colors using a colormap
-colormap = cm.get_cmap('viridis')  # Change to 'jet' or other colormaps if needed
-tmp = observed_pred.mean.cpu().numpy()
-# tmp = tmp/sum(tmp)
-colors = colormap(tmp)[:, :3]  # Convert to RGB
+# colormap = cm.get_cmap('jet')  # Change to 'jet' or other colormaps if needed
+# tmp = observed_pred.mean.cpu().numpy()
+# colors = colormap(tmp)[:, :3]  # Convert to RGB
 
-# Create Open3D point cloud object
-pcd = o3d.geometry.PointCloud()
-pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
-pcd.colors = o3d.utility.Vector3dVector(colors)
+# # Create Open3D point cloud object
+# pcd = o3d.geometry.PointCloud()
+# pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
+# pcd.colors = o3d.utility.Vector3dVector(colors)
 
 # Visualise with Open3D
-o3d.visualization.draw_geometries([pcd], window_name="Target density")
+# o3d.visualization.draw_geometries([pcd], window_name="Target density")
 
 agent = SecondOrderAgent(
     x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity,max_acceleration=param.max_acceleration*2
@@ -353,7 +364,7 @@ agent.x = pcloud.vertices[random_vertex]
 agent.radius = param.agent_radius
 
 
-x_arr, heat_arr, coverage_arr, time_arr = hedac(agent, param, pcloud)
+x_arr, heat_arr, coverage_arr, time_arr, goal_arr = hedac(agent, param, pcloud)
 
 
 plots = visualize_point_cloud(
@@ -365,3 +376,9 @@ plots = visualize_point_cloud(
 fig = visualize_trajectory(x_arr[:,:], plots, color="black")
 
 fig.show()
+
+import plotly.io as pio
+
+animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=goal_arr, timesteps=param.timesteps, save_path="cup_X_reconstructed_dist2.html")
+
+animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=heat_arr, timesteps=param.timesteps, save_path="cup_X_heat2.html")

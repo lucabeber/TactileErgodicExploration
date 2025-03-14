@@ -17,11 +17,9 @@
     along with diffusionVirtualFixtures. If not, see <http://www.gnu.org/licenses/>.
 """
 
-import plotly.graph_objects as go
-
-import open3d as o3d
-
 import numpy as np
+import open3d as o3d
+import plotly.graph_objects as go
 
 
 def show_plot(plots, camera_params=None, showlegend=True):
@@ -252,3 +250,128 @@ def streamline_plot(
 
     else:
         return plots
+
+def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, save_path=None):
+
+    # Set the camera
+    camera_params = dict(
+        up=dict(x=0, y=1, z=0),
+        center=dict(x=0, y=0, z=0),
+        eye=dict(x=0.0, y=0.0, z=2),
+    )
+
+    # Initial Point Cloud (static positions, dynamic color)
+    point_cloud = go.Scatter3d(
+        x=vertices[:, 0],
+        y=vertices[:, 1],
+        z=vertices[:, 2],
+        mode="markers",
+        marker=dict(
+            size=5,
+            opacity=0.8,
+            color=color_frames[...,0],  # Use the first frame's colors
+            colorscale="bluered",
+        ),
+        name="Reconstructed Target",
+    )
+
+    # Initial Trajectory Marker
+    trajectory = go.Scatter3d(
+        x=[x_arr[0, 0]],
+        y=[x_arr[0, 1]],
+        z=[x_arr[0, 2]],
+        mode="lines",
+        line=dict(width=10, color="black"),
+        name="Trajectory",
+        opacity=0.3,  # Set the opacity of the line
+    )
+
+    # Create Figure
+    fig = go.Figure(
+        data=[point_cloud, trajectory],  
+        layout=go.Layout(
+            scene=dict(
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+                zaxis=dict(visible=False),
+                aspectmode="data",
+            ),
+            showlegend=False,
+            scene_camera=camera_params,
+        ),
+    )
+
+    # Animation Frames (Update Trajectory + Colors)
+    timestep_multiplier = 10
+    n_frames = timesteps // timestep_multiplier + 1  
+    frames = [
+        go.Frame(
+            data=[
+                # Update point cloud color
+                go.Scatter3d(
+                    x=vertices[:, 0],
+                    y=vertices[:, 1],
+                    z=vertices[:, 2],
+                    mode="markers",
+                    marker=dict(
+                        size=5,
+                        opacity=0.8,
+                        color=color_frames[...,k*timestep_multiplier-1],  # Update colors
+                        colorscale="bluered",
+                    ),
+                    name="Reconstructed Target",
+                ),
+                # Update trajectory
+                go.Scatter3d(
+                    x=x_arr[: k * timestep_multiplier, 0],
+                    y=x_arr[: k * timestep_multiplier, 1],
+                    z=x_arr[: k * timestep_multiplier, 2],
+                    mode="lines",
+                    line=dict(width=10, color="black"),
+                    name="Trajectory",
+                    opacity=0.3,  # Set the opacity of the line
+                )
+            ],
+            name=f"frame{k}",
+            traces=[0, 1],  # Update both point cloud (0) and trajectory (1)
+        )
+        for k in range(n_frames)
+    ]
+    
+    fig.update(frames=frames)
+
+    # Sliders
+    sliders = [
+        dict(
+            steps=[
+                dict(
+                    method="animate",
+                    args=[
+                        [f"frame{k}"],
+                        dict(
+                            mode="immediate",
+                            frame=dict(duration=400, redraw=True),
+                            transition=dict(duration=0),
+                        ),
+                    ],
+                    label=f"{k+1}",
+                )
+                for k in range(n_frames)
+            ],
+            active=0,
+            transition=dict(duration=0),
+            x=0,
+            y=0,
+            currentvalue=dict(font=dict(size=12), prefix="frame: ", visible=True, xanchor="center"),
+            len=1.0,
+        )
+    ]
+    
+    fig.update_layout(width=1000, height=1000, sliders=sliders)
+
+    if save_path:
+        fig.write_html(save_path)
+
+    fig.show()
+
+

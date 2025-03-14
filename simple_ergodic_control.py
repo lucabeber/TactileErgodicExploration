@@ -117,7 +117,7 @@ point_cloud_dir = "point_clouds/"
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
 # obj_name = "plate_shapes"  # random IKEA plate with hand-drawn shapes
-obj_name = "cup_X" # random cup that we scanned with X projected as the target
+# obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
 experiment_index = 2  # choose which initial position to use from x0_arr_10.npz
 
