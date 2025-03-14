@@ -79,8 +79,8 @@ def hedac(agent, param, pcloud):
     likelihood.train()
 
     # Load parameters from the saved model
-    model.load_state_dict(torch.load("model_state.pth"))
-    likelihood.load_state_dict(torch.load("likelihood_state.pth"))
+    model.load_state_dict(torch.load(model_state_path))
+    likelihood.load_state_dict(torch.load(likelihood_state_path))
 
     # Switch to evaluation mode
     model.eval()
@@ -312,6 +312,16 @@ def get_border_indices(vertices, nb_boundary_neighbors):
     threshold = np.percentile(mean_distances, 95)
     border_indices = np.where(mean_distances > threshold)[0]
 
+    # # Show the border vertices in the point cloud
+    # pcd = o3d.geometry.PointCloud()
+    # pcd.points = o3d.utility.Vector3dVector(vertices)
+    # pcd.colors = o3d.utility.Vector3dVector(np.zeros_like(vertices))
+    # colors = np.zeros_like(vertices)
+    # colors[border_indices] = [1, 0, 0]  # Red color for the border vertices
+    # pcd.colors = o3d.utility.Vector3dVector(colors)
+    # o3d.visualization.draw_geometries([pcd], window_name="Border vertices")
+
+
     return border_indices
 
 # Construct training data
@@ -339,8 +349,8 @@ model_real = GPModel(train_x, train_y, likelihood_real)
 model_real.train()
 likelihood_real.train()
 
-model_state_path = "model_state.pth"
-likelihood_state_path = "likelihood_state.pth"
+model_state_path = obj_name + "_model_state.pth"
+likelihood_state_path = obj_name + "_likelihood_state.pth"
 
 if os.path.exists(model_state_path) and os.path.exists(likelihood_state_path):
     # Load parameters from the saved model
@@ -372,18 +382,18 @@ with torch.no_grad(), gpytorch.settings.fast_pred_var():
     test_x = torch.tensor(pcloud.vertices, dtype=torch.float32)
     observed_pred = likelihood_real(model_real(test_x))
 
-# Map stiffness to RGB colors using a colormap
-colormap = cm.get_cmap('jet')  # Change to 'jet' or other colormaps if needed
-tmp = observed_pred.mean.cpu().numpy()
-colors = colormap(tmp)[:, :3]  # Convert to RGB
-# 
-# Create Open3D point cloud object
-pcd = o3d.geometry.PointCloud()
-pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
-pcd.colors = o3d.utility.Vector3dVector(colors)
+# # Map stiffness to RGB colors using a colormap
+# colormap = cm.get_cmap('jet')  # Change to 'jet' or other colormaps if needed
+# tmp = observed_pred.mean.cpu().numpy()
+# colors = colormap(tmp)[:, :3]  # Convert to RGB
+# # 
+# # Create Open3D point cloud object
+# pcd = o3d.geometry.PointCloud()
+# pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
+# pcd.colors = o3d.utility.Vector3dVector(colors)
 
-# Visualise with Open3D
-o3d.visualization.draw_geometries([pcd], window_name="Target density")
+# # Visualise with Open3D
+# o3d.visualization.draw_geometries([pcd], window_name="Target density")
 
 agent = SecondOrderAgent(
     x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity,max_acceleration=param.max_acceleration*2
