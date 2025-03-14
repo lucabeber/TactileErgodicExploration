@@ -6,3 +6,5 @@ __pycache__
 !*x0_arr_10.npz
 *.pdf
 *.html
+*.pth
+__pycache__

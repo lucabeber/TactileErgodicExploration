@@ -193,7 +193,11 @@ def hedac(agent, param, pcloud):
 
             var_tmp = observed_pred.variance.cpu().numpy()
 
-            goal_density = (normalize_mat(observed_pred.mean.cpu().numpy()))
+            # Set variance to zero along the borders of the point cloud
+            border_indices = get_border_indices(pcloud.vertices, param.nb_boundary_neighbors)
+            var_tmp[border_indices] = 0
+
+            goal_density = (normalize_mat(observed_pred.mean.cpu().numpy()) + normalize_mat(var_tmp)) /2
 
             # plots = visualize_point_cloud(
             #     pcloud.vertices, 
@@ -221,8 +225,8 @@ point_cloud_dir = "point_clouds/"
 # Select the object to explore
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
-# obj_name = "plate_shapes"  # random IKEA plate with hand-drawn shapes
-obj_name = "cup_X" # random cup that we scanned with X projected as the target
+obj_name = "plate_shapes"  # random IKEA plate with hand-drawn shapes
+# obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
 experiment_index = 2  # choose which initial position to use from x0_arr_10.npz
 
@@ -284,6 +288,32 @@ import open3d as o3d
 import os
 import matplotlib.cm as cm
 
+def get_border_indices(vertices, nb_boundary_neighbors):
+    """
+    Identify the border indices of the point cloud.
+
+    Args:
+        vertices (np.ndarray): The vertices of the point cloud.
+        nb_boundary_neighbors (int): The number of neighbors to consider for boundary detection.
+
+    Returns:
+        np.ndarray: The indices of the border vertices.
+    """
+    from sklearn.neighbors import NearestNeighbors
+
+    # Find the nearest neighbors
+    nbrs = NearestNeighbors(n_neighbors=nb_boundary_neighbors).fit(vertices)
+    distances, indices = nbrs.kneighbors(vertices)
+
+    # Calculate the mean distance to the neighbors
+    mean_distances = distances.mean(axis=1)
+
+    # Identify the border vertices as those with the highest mean distance to neighbors
+    threshold = np.percentile(mean_distances, 95)
+    border_indices = np.where(mean_distances > threshold)[0]
+
+    return border_indices
+
 # Construct training data
 train_x = torch.tensor(pcloud.vertices, dtype=torch.float32)
 train_y = torch.tensor(pcloud.u0, dtype=torch.float32)
@@ -317,10 +347,10 @@ if os.path.exists(model_state_path) and os.path.exists(likelihood_state_path):
     model_real.load_state_dict(torch.load(model_state_path))
     likelihood_real.load_state_dict(torch.load(likelihood_state_path))
 else:
-    optimizer = torch.optim.Adam(model_real.parameters(), lr=0.5)
+    optimizer = torch.optim.Adam(model_real.parameters(), lr=0.2)
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood_real, model_real)
 
-    training_iterations = 50
+    training_iterations = 20
     for i in range(training_iterations):
         optimizer.zero_grad()
         output = model_real(train_x)
@@ -343,17 +373,17 @@ with torch.no_grad(), gpytorch.settings.fast_pred_var():
     observed_pred = likelihood_real(model_real(test_x))
 
 # Map stiffness to RGB colors using a colormap
-# colormap = cm.get_cmap('jet')  # Change to 'jet' or other colormaps if needed
-# tmp = observed_pred.mean.cpu().numpy()
-# colors = colormap(tmp)[:, :3]  # Convert to RGB
-
-# # Create Open3D point cloud object
-# pcd = o3d.geometry.PointCloud()
-# pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
-# pcd.colors = o3d.utility.Vector3dVector(colors)
+colormap = cm.get_cmap('jet')  # Change to 'jet' or other colormaps if needed
+tmp = observed_pred.mean.cpu().numpy()
+colors = colormap(tmp)[:, :3]  # Convert to RGB
+# 
+# Create Open3D point cloud object
+pcd = o3d.geometry.PointCloud()
+pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
+pcd.colors = o3d.utility.Vector3dVector(colors)
 
 # Visualise with Open3D
-# o3d.visualization.draw_geometries([pcd], window_name="Target density")
+o3d.visualization.draw_geometries([pcd], window_name="Target density")
 
 agent = SecondOrderAgent(
     x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity,max_acceleration=param.max_acceleration*2
@@ -379,6 +409,6 @@ fig.show()
 
 import plotly.io as pio
 
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=goal_arr, timesteps=param.timesteps, save_path="cup_X_reconstructed_dist2.html")
+animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=goal_arr, timesteps=param.timesteps, save_path="cup_X_reconstructed_dist3.html")
 
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=heat_arr, timesteps=param.timesteps, save_path="cup_X_heat2.html")
+animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=heat_arr, timesteps=param.timesteps, save_path="cup_X_heat3.html")
