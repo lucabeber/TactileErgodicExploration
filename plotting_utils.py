@@ -257,7 +257,7 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, save_pat
     camera_params = dict(
         up=dict(x=0, y=1, z=0),
         center=dict(x=0, y=0, z=0),
-        eye=dict(x=0.0, y=0.0, z=2),
+        eye=dict(x=0.0, y=0.0, z=2),  # Change the z value to -2 to view from the back
     )
 
     # Initial Point Cloud (static positions, dynamic color)
