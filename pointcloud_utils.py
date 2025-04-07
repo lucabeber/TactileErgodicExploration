@@ -186,61 +186,6 @@ def compute_tangent_space(neighbor_coords):
 
     return normal_vector, tangent_vector1, tangent_vector2
 
-# def compute_tangent_space(neighbor_coords):
-#     """
-#     Compute the tangent space of a local neighborhood.
-
-#     Parameters:
-#     -----------
-#     neighbor_coords: numpy.ndarray
-#         The coordinates of the neighboring points.
-
-#     Returns:
-#     --------
-#     Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]
-#         The normal vector, tangent vector 1, and tangent vector 2.
-#     """
-#     # Step 1: Fit a plane to the local neighborhood using least squares
-#     # plane equation ax + by + c = z, plane equation is similar to the line equation
-#     # y = ax+b this is why we don't have a coefficient for z in the plane equation
-#     # A = [x y 1]
-#     # x = [a b c]T
-#     # b = z
-#     A = np.column_stack(
-#         [
-#             neighbor_coords[:, 0],
-#             neighbor_coords[:, 1],
-#             np.ones_like(neighbor_coords[:, 0]),
-#         ]
-#     )
-#     b = neighbor_coords[:, 2]  # z coords.
-#     coefficients, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
-
-#     # Step 2: Compute the normal vector of the fitted plane
-#     # this is the gradient of the plane equation
-
-#     normal_vector = np.array([coefficients[0], coefficients[1], -1.0])
-
-#     # Step 3: Choose two tangent vectors in the tangent plane
-#     # u-axis is perp to the normal -> dot product is 0
-#     tangent_vector1 = np.array([-coefficients[1], coefficients[0], 0])  # u-axis
-
-#     # second tangent vector is perp to the normal and to the first tangent vector
-#     tangent_vector2 = np.cross(normal_vector, tangent_vector1)  # v-axis
-
-#     # Step 4: Normalize the vectors
-#     tangent_vector1 /= np.linalg.norm(tangent_vector1)
-#     tangent_vector2 /= np.linalg.norm(tangent_vector2)
-#     normal_vector /= np.linalg.norm(normal_vector)
-
-#     return (
-#         coefficients,
-#         normal_vector,
-#         tangent_vector1,
-#         tangent_vector2,
-#     )
-
-
 def project_points2tangent_space(
     agent_coords,
     neighbor_coords,
@@ -302,44 +247,6 @@ def project_points2tangent_space(
         uv_coords[1:, :],
     )
 
-
-# def fit_poly_surface(uv_coords, values, degree=3):
-#     """
-#     Fit a polynomial surface to the point cloud.
-
-#     Parameters:
-#     -----------
-#     uv_coords: numpy.ndarray
-#         The UV coordinates of the point cloud.
-#     values: numpy.ndarray
-#         The values of the point cloud.
-#     degree: int
-#         The degree of the polynomial.
-
-#     Returns:
-#     --------
-#     Tuple[numpy.ndarray, numpy.ndarray]
-#         The coefficients of the polynomial and the transformed
-#         coordinates.
-#     """
-#     dists = np.linalg.norm(uv_coords, axis=1)
-#     eps = 1 / (np.max(dists) + 1e-8)
-#     weights = np.exp(-eps * dists**2)
-#     W = np.diag(weights)
-
-#     x = np.vstack(
-#         [
-#             uv_coords[:, 0],
-#             uv_coords[:, 1],
-#             np.ones_like(uv_coords[:, 0]),
-#         ]
-#     ).T
-#     poly = PolynomialFeatures(degree)
-#     X = poly.fit_transform(x)
-
-#     y = values
-#     coeffs = np.linalg.pinv(X.T @ W @ X) @ X.T @ W @ y
-#     return coeffs, X
 
 def fit_poly_surface(uv_coords, values, degree=3):
     """
