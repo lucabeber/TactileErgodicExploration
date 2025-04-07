@@ -22,6 +22,10 @@ import numpy as np
 np.set_printoptions(formatter={"float": lambda x: "{0:0.3e}".format(x)})
 
 import time
+import torch
+device = torch.device("cpu")
+# print("Using device: ", device)
+torch.set_default_device(device)
 
 
 
@@ -404,6 +408,6 @@ fig.show()
 
 import plotly.io as pio
 
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=goal_arr, timesteps=param.timesteps, save_path="bunny_3dk_target_distribution.html")
+animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=goal_arr, timesteps=param.timesteps, save_path="pl_3dk_target_distribution.html")
 
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=heat_arr, timesteps=param.timesteps, save_path="bunny_3dk_goal_density.html")
+animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=heat_arr, timesteps=param.timesteps, save_path="pl_3dk_goal_density.html")
