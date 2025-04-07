@@ -18,10 +18,10 @@
 """
 
 import numpy as np
-
+import open3d as o3d
 from scipy.spatial import KDTree
 from sklearn.preprocessing import PolynomialFeatures
-import open3d as o3d
+
 
 def compute_coverage_residual(initial_heat_arr, coverage_arr):
     """
@@ -80,7 +80,7 @@ def process_point_cloud(filename, param):
         + f"\n resulted in {len(pcd.points)} points"
     )
     # set the exploration target using the 'red' channel of the point cloud
-    u0 = colors[:, 0]
+    u0 = colors[:, 1]
     pcloud.u0 = u0 #np.where(u0 < 1, 0, 255)
     # compute the K-D tree for the nearest neighbor queries later
     pcloud.pcd_tree = o3d.geometry.KDTreeFlann(pcd)
@@ -155,66 +155,95 @@ def calculate_dt(vertices, m=1):
     dt = m * h**2
     return dt, h
 
-
 def compute_tangent_space(neighbor_coords):
     """
-    Compute the tangent space of a local neighborhood.
+    Compute tangent and normal vectors using PCA.
 
     Parameters:
     -----------
-    neighbor_coords: numpy.ndarray
-        The coordinates of the neighboring points.
+    neighbor_coords: (N, 3) array
+        Local neighborhood points.
 
     Returns:
     --------
-    Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]
-        The normal vector, tangent vector 1, and tangent vector 2.
+    Tuple:
+        normal_vector (3,),
+        tangent_vector1 (3,),
+        tangent_vector2 (3,)
     """
-    # Step 1: Fit a plane to the local neighborhood using least squares
-    # plane equation ax + by + c = z, plane equation is similar to the line equation
-    # y = ax+b this is why we don't have a coefficient for z in the plane equation
-    # A = [x y 1]
-    # x = [a b c]T
-    # b = z
-    A = np.column_stack(
-        [
-            neighbor_coords[:, 0],
-            neighbor_coords[:, 1],
-            np.ones_like(neighbor_coords[:, 0]),
-        ]
-    )
-    b = neighbor_coords[:, 2]  # z coords.
-    coefficients, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+    # Center the neighborhood
+    centroid = np.mean(neighbor_coords, axis=0)
+    centered = neighbor_coords - centroid
 
-    # Step 2: Compute the normal vector of the fitted plane
-    # this is the gradient of the plane equation
+    # PCA via SVD
+    U, S, Vt = np.linalg.svd(centered, full_matrices=False)
 
-    normal_vector = np.array([coefficients[0], coefficients[1], -1.0])
+    # The right-singular vectors (rows of Vt) are the directions
+    # The smallest singular value corresponds to the normal
+    tangent_vector1 = Vt[0]
+    tangent_vector2 = Vt[1]
+    normal_vector = Vt[2]
 
-    # Step 3: Choose two tangent vectors in the tangent plane
-    # u-axis is perp to the normal -> dot product is 0
-    tangent_vector1 = np.array([-coefficients[1], coefficients[0], 0])  # u-axis
+    return normal_vector, tangent_vector1, tangent_vector2
 
-    # second tangent vector is perp to the normal and to the first tangent vector
-    tangent_vector2 = np.cross(normal_vector, tangent_vector1)  # v-axis
+# def compute_tangent_space(neighbor_coords):
+#     """
+#     Compute the tangent space of a local neighborhood.
 
-    # Step 4: Normalize the vectors
-    tangent_vector1 /= np.linalg.norm(tangent_vector1)
-    tangent_vector2 /= np.linalg.norm(tangent_vector2)
-    normal_vector /= np.linalg.norm(normal_vector)
+#     Parameters:
+#     -----------
+#     neighbor_coords: numpy.ndarray
+#         The coordinates of the neighboring points.
 
-    return (
-        coefficients,
-        normal_vector,
-        tangent_vector1,
-        tangent_vector2,
-    )
+#     Returns:
+#     --------
+#     Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]
+#         The normal vector, tangent vector 1, and tangent vector 2.
+#     """
+#     # Step 1: Fit a plane to the local neighborhood using least squares
+#     # plane equation ax + by + c = z, plane equation is similar to the line equation
+#     # y = ax+b this is why we don't have a coefficient for z in the plane equation
+#     # A = [x y 1]
+#     # x = [a b c]T
+#     # b = z
+#     A = np.column_stack(
+#         [
+#             neighbor_coords[:, 0],
+#             neighbor_coords[:, 1],
+#             np.ones_like(neighbor_coords[:, 0]),
+#         ]
+#     )
+#     b = neighbor_coords[:, 2]  # z coords.
+#     coefficients, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+
+#     # Step 2: Compute the normal vector of the fitted plane
+#     # this is the gradient of the plane equation
+
+#     normal_vector = np.array([coefficients[0], coefficients[1], -1.0])
+
+#     # Step 3: Choose two tangent vectors in the tangent plane
+#     # u-axis is perp to the normal -> dot product is 0
+#     tangent_vector1 = np.array([-coefficients[1], coefficients[0], 0])  # u-axis
+
+#     # second tangent vector is perp to the normal and to the first tangent vector
+#     tangent_vector2 = np.cross(normal_vector, tangent_vector1)  # v-axis
+
+#     # Step 4: Normalize the vectors
+#     tangent_vector1 /= np.linalg.norm(tangent_vector1)
+#     tangent_vector2 /= np.linalg.norm(tangent_vector2)
+#     normal_vector /= np.linalg.norm(normal_vector)
+
+#     return (
+#         coefficients,
+#         normal_vector,
+#         tangent_vector1,
+#         tangent_vector2,
+#     )
 
 
 def project_points2tangent_space(
     agent_coords,
     neighbor_coords,
-    coefficients,
     normal_vector,
     tangent_vector_1,
     tangent_vector_2,
@@ -248,7 +277,7 @@ def project_points2tangent_space(
     # plane_point = np.average(coords, axis=0)
     # plane equation: ax + by + c = z
     # get a point on the plane, set x = y = 0 -> c = z
-    plane_point = np.array([0, 0, coefficients[2]])
+    plane_point = agent_coords
 
     projected_agent_positon = (
         agent_coords - np.dot(agent_coords - plane_point, normal_vector) * normal_vector
@@ -274,44 +303,79 @@ def project_points2tangent_space(
     )
 
 
+# def fit_poly_surface(uv_coords, values, degree=3):
+#     """
+#     Fit a polynomial surface to the point cloud.
+
+#     Parameters:
+#     -----------
+#     uv_coords: numpy.ndarray
+#         The UV coordinates of the point cloud.
+#     values: numpy.ndarray
+#         The values of the point cloud.
+#     degree: int
+#         The degree of the polynomial.
+
+#     Returns:
+#     --------
+#     Tuple[numpy.ndarray, numpy.ndarray]
+#         The coefficients of the polynomial and the transformed
+#         coordinates.
+#     """
+#     dists = np.linalg.norm(uv_coords, axis=1)
+#     eps = 1 / (np.max(dists) + 1e-8)
+#     weights = np.exp(-eps * dists**2)
+#     W = np.diag(weights)
+
+#     x = np.vstack(
+#         [
+#             uv_coords[:, 0],
+#             uv_coords[:, 1],
+#             np.ones_like(uv_coords[:, 0]),
+#         ]
+#     ).T
+#     poly = PolynomialFeatures(degree)
+#     X = poly.fit_transform(x)
+
+#     y = values
+#     coeffs = np.linalg.pinv(X.T @ W @ X) @ X.T @ W @ y
+#     return coeffs, X
+
 def fit_poly_surface(uv_coords, values, degree=3):
     """
-    Fit a polynomial surface to the point cloud.
+    Fit a polynomial surface to the point cloud in UV space.
 
     Parameters:
     -----------
-    uv_coords: numpy.ndarray
-        The UV coordinates of the point cloud.
-    values: numpy.ndarray
-        The values of the point cloud.
+    uv_coords: (N, 2) array
+        2D UV coordinates.
+    values: (N,) array
+        Scalar values to fit.
     degree: int
-        The degree of the polynomial.
+        Degree of polynomial surface.
 
     Returns:
     --------
-    Tuple[numpy.ndarray, numpy.ndarray]
-        The coefficients of the polynomial and the transformed
-        coordinates.
+    coeffs: (M,) array
+        Polynomial coefficients.
+    X: (N, M) array
+        Transformed design matrix.
     """
-    dists = np.linalg.norm(uv_coords, axis=1)
-    eps = 1 / np.max(dists)
+    print(uv_coords)
+    uv_centered = uv_coords - np.mean(uv_coords, axis=0)
+    dists = np.linalg.norm(uv_centered, axis=1)
+    eps = 1 / (np.max(dists) + 1e-8)
     weights = np.exp(-eps * dists**2)
-    W = np.diag(weights)
 
-    x = np.vstack(
-        [
-            uv_coords[:, 0],
-            uv_coords[:, 1],
-            np.ones_like(uv_coords[:, 0]),
-        ]
-    ).T
+    x = np.vstack([uv_centered[:, 0], uv_centered[:, 1], np.ones_like(uv_centered[:, 0])]).T
     poly = PolynomialFeatures(degree)
     X = poly.fit_transform(x)
 
     y = values
-    coeffs = np.linalg.pinv(X.T @ W @ X) @ X.T @ W @ y
-    return coeffs, X
 
+    # Weighted least squares
+    coeffs, *_ = np.linalg.lstsq(X * weights[:, None], y * weights, rcond=None)
+    return coeffs, X
 
 def get_gradient_3rd_degree_polynomial(uv_coords, c, return_neighbors=False):
     """
@@ -402,12 +466,12 @@ def get_gradient(
         The gradient vectors at each vertex.
     """
     (
-        coefficients,
         normal_vector,
         tangent_vector_1,
         tangent_vector_2,
     ) = compute_tangent_space(neighbor_coords)
 
+    print(normal_vector,tangent_vector_1,tangent_vector_2)
     (
         projected_agent_positon,
         projected_neighbor_coords,
@@ -415,7 +479,6 @@ def get_gradient(
     ) = project_points2tangent_space(
         agent_position,
         neighbor_coords,
-        coefficients,
         normal_vector,
         tangent_vector_1,
         tangent_vector_2,

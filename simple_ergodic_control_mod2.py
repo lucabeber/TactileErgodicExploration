@@ -22,7 +22,9 @@ import numpy as np
 np.set_printoptions(formatter={"float": lambda x: "{0:0.3e}".format(x)})
 
 import time
+
 import torch
+
 device = torch.device("cpu")
 # print("Using device: ", device)
 torch.set_default_device(device)
@@ -33,11 +35,11 @@ import robust_laplacian
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import splu
 
+from gpr_on_point_cloud import *
 from plotting_utils import *
 from pointcloud_utils import *
 from virtual_agents import SecondOrderAgent
 
-from gpr_on_point_cloud import *
 
 def hedac(agent, param, pcloud):
     """
@@ -69,12 +71,9 @@ def hedac(agent, param, pcloud):
         gpr_original_density = likelihood_real(model_real(sample_points))
 
     density_sample = gpr_original_density.mean.cpu()
-    # print(stiffness_sample)
     # Construct training data
     train_x = sample_points.clone()
     train_y = density_sample.clone()
-    print(train_x)
-    print(train_y)
 
     # Initialize the likelihood and model
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
@@ -164,6 +163,7 @@ def hedac(agent, param, pcloud):
             print(f"Time step: {t}/{param.timesteps}")
             # Update the goal density
             # Extract the trajectory
+
             sample_points = torch.tensor(agent.x_arr[:t:3, :] , dtype=torch.float32)
 
             # Make prediction
@@ -191,17 +191,7 @@ def hedac(agent, param, pcloud):
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 observed_pred = likelihood(model(test_x))
             
-            # # Map stiffness to RGB colors using a colormap
-            # colormap = cm.get_cmap('jet')  # Change to 'jet' or other colormaps if needed
-            # colors = colormap(observed_pred.mean.cpu().numpy())[:, :3]  # Convert to RGB
 
-            # # Create Open3D point cloud object
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
-            # pcd.colors = o3d.utility.Vector3dVector(colors)
-
-            # # Visualise with Open3D
-            # o3d.visualization.draw_geometries([pcd], window_name="Target density")
 
             var_tmp = observed_pred.variance.cpu().numpy()
 
@@ -210,24 +200,7 @@ def hedac(agent, param, pcloud):
 
             goal_density = (normalize_mat(observed_pred.mean.cpu().numpy()) + normalize_mat(var_tmp)) /2
             goal_density[border_indices] = 0
-            # plots = visualize_point_cloud(
-            #     pcloud.vertices, 
-            #     colors=goal_density, 
-            #     # colors=heat_arr[...,-1], 
-            #     is_show_plot=False, point_size=5
-            # )
-            # fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
-            # fig.show()
 
-            # plots = visualize_point_cloud(
-            #     pcloud.vertices, 
-            #     colors=heat_arr[...,t], 
-            #     # colors=heat_arr[...,-1], 
-            #     is_show_plot=False, point_size=5
-            # )
-            # fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
-
-            # fig.show()
 
     return agent.x_arr, heat_arr, coverage_arr, time_arr, goal_density_arr
 
@@ -236,7 +209,7 @@ point_cloud_dir = "point_clouds/"
 # Select the object to explore
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
-obj_name = "plate_shapes"  # random IKEA plate with hand-drawn shapes
+obj_name = "rectangular_grid_10k_annotated"  # random IKEA plate with hand-drawn shapes
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
 experiment_index = 2  # choose which initial position to use from x0_arr_10.npz
@@ -254,7 +227,7 @@ param.alpha = 100
 param.method = "exact"
 
 # voxel filter size for downsampling the point cloud
-param.voxel_size = 0.003
+param.voxel_size = 0.02
 # radius for the agent footprint that'd be used in coverage
 param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
@@ -290,14 +263,17 @@ A = csc_matrix(pcloud.M + pcloud.dt * pcloud.C)  # Ensure sparse format
 pcloud.A_factorized = splu(A)  # LU factorization
 
 
+import os
+
+import gpytorch
+import matplotlib.cm as cm
+import matplotlib.pyplot as plt
+import open3d as o3d
+
 # Define the goal density
 # ========================
 import torch
-import gpytorch
-import matplotlib.pyplot as plt
-import open3d as o3d
-import os
-import matplotlib.cm as cm
+
 
 def get_border_indices(vertices, nb_boundary_neighbors):
     """
@@ -323,16 +299,6 @@ def get_border_indices(vertices, nb_boundary_neighbors):
     threshold = np.percentile(mean_distances, 85)  # Adjust this threshold as needed
     border_indices = np.where(mean_distances > threshold)[0]
 
-    # Show the border vertices in the point cloud
-    # pcd = o3d.geometry.PointCloud()
-    # pcd.points = o3d.utility.Vector3dVector(vertices)
-    # pcd.colors = o3d.utility.Vector3dVector(np.zeros_like(vertices))
-    # colors = np.zeros_like(vertices)
-    # colors[border_indices] = [1, 0, 0]  # Red color for the border vertices
-    # pcd.colors = o3d.utility.Vector3dVector(colors)
-    # o3d.visualization.draw_geometries([pcd], window_name="Border vertices")
-
-
     return border_indices
 
 # Load gp on pc class
@@ -354,12 +320,11 @@ model_real = GPROnPointCloud(train_x, train_y, likelihood_real, km, pcloud.verti
 model_real.train()
 likelihood_real.train()
 
-
 # Get into evaluation (predictive posterior) mode and predict
 model_real.eval()
 likelihood_real.eval()
-
 import time
+
 start = time.time()
 with torch.no_grad():
     observed_pred = likelihood_real(model_real(train_x))
@@ -367,14 +332,11 @@ end = time.time()
 print(f"Time to predict: {end - start}")
 mean = observed_pred.mean.cpu().numpy()
 # var = observed_pred.variance.cpu().numpy()
-
-
 camera = dict(
     up=dict(x=0, y=1, z=0),
     center=dict(x=0, y=0, z=0),
     eye=dict(x=0, y=0.7, z=1.25)
 )
-
 plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean)
 fig = go.Figure(plot)
 update_figure(fig)
@@ -396,15 +358,6 @@ agent.radius = param.agent_radius
 x_arr, heat_arr, coverage_arr, time_arr, goal_arr = hedac(agent, param, pcloud)
 
 
-plots = visualize_point_cloud(
-    pcloud.vertices, 
-    colors=heat_arr[...,0], 
-    # colors=heat_arr[...,-1], 
-    is_show_plot=False, point_size=5
-)
-fig = visualize_trajectory(x_arr[:,:], plots, color="black")
-
-fig.show()
 
 import plotly.io as pio
 
