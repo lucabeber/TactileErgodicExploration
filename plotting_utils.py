@@ -252,12 +252,12 @@ def streamline_plot(
         return plots
 
 def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, save_path=None):
-
+    point_size = 10
     # Set the camera
     camera_params = dict(
         up=dict(x=0, y=1, z=0),
         center=dict(x=0, y=0, z=0),
-        eye=dict(x=0.0, y=0.0, z=-2),  # Change the z value to -2 to view from the back
+        eye=dict(x=0.0, y=0.0, z=1.2),  # Change the z value to -2 to view from the back
     )
 
     # Initial Point Cloud (static positions, dynamic color)
@@ -267,7 +267,7 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, save_pat
         z=vertices[:, 2],
         mode="markers",
         marker=dict(
-            size=5,
+            size=point_size,
             opacity=0.8,
             color=color_frames[...,0],  # Use the first frame's colors
             colorscale="bluered",
@@ -314,7 +314,7 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, save_pat
                     z=vertices[:, 2],
                     mode="markers",
                     marker=dict(
-                        size=5,
+                        size=point_size,
                         opacity=0.8,
                         color=color_frames[...,k*timestep_multiplier-1],  # Update colors
                         colorscale="bluered",
@@ -367,7 +367,8 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, save_pat
         )
     ]
     
-    fig.update_layout(width=600, height=400, sliders=sliders)
+
+    fig.update_layout(width=1200, height=800, sliders=sliders)
 
     if save_path:
         fig.write_html(save_path)

@@ -268,7 +268,6 @@ def fit_poly_surface(uv_coords, values, degree=3):
     X: (N, M) array
         Transformed design matrix.
     """
-    print(uv_coords)
     uv_centered = uv_coords - np.mean(uv_coords, axis=0)
     dists = np.linalg.norm(uv_centered, axis=1)
     eps = 1 / (np.max(dists) + 1e-8)
@@ -378,7 +377,6 @@ def get_gradient(
         tangent_vector_2,
     ) = compute_tangent_space(neighbor_coords)
 
-    print(normal_vector,tangent_vector_1,tangent_vector_2)
     (
         projected_agent_positon,
         projected_neighbor_coords,

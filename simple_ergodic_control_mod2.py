@@ -38,7 +38,7 @@ from scipy.sparse.linalg import splu
 from gpr_on_point_cloud import *
 from plotting_utils import *
 from pointcloud_utils import *
-from virtual_agents import SecondOrderAgent
+from virtual_agents import FirstOrderAgent, SecondOrderAgent
 
 
 def hedac(agent, param, pcloud):
@@ -63,6 +63,7 @@ def hedac(agent, param, pcloud):
     coverage_arr = np.zeros((len(pcloud.vertices), param.timesteps))
     heat_arr = np.zeros_like(coverage_arr)
     goal_density_arr = np.zeros_like(coverage_arr)
+    gp_arr = np.zeros_like(coverage_arr)
     
     # Initialize goal density
     sample_points = torch.tensor(agent.x, dtype=torch.float32).reshape(1, -1)
@@ -103,18 +104,21 @@ def hedac(agent, param, pcloud):
     coverage = np.zeros_like(goal_density)
     
     # plot the initial goal density
-    plot = plot_point_cloud(test_x, point_colors=coverage)
-    fig = go.Figure(plot)
-    update_figure(fig)
-    fig.update_layout(
-        scene_camera=camera
-    )
+    # plot = plot_point_cloud(test_x, point_colors=coverage)
+    # fig = go.Figure(plot)
+    # update_figure(fig)
+    # fig.update_layout(
+    #     scene_camera=camera
+    # )
 
-    fig.show('browser')
+    # fig.show('browser')
+
     # for keeping the runtime of each timestep
     time_arr = np.zeros(param.timesteps)
 
     agent.t = 0  # reset the agent's time
+    gp_val = goal_density
+    indices = []
     # do absolute minimum inside the main loop
     for t in range(param.timesteps):
         dists, neighbor_ids, neighbor_coords = get_pcloud_neighbors(
@@ -159,12 +163,24 @@ def hedac(agent, param, pcloud):
         heat_arr[..., t] = np.copy(ut)
         goal_density_arr[..., t] = goal_density
 
-        if t % 50 == 0 and t > 0:
+        gp_arr[...,t] = gp_val
+
+        if t % param.look_step == 0 and t > 0:
             print(f"Time step: {t}/{param.timesteps}")
             # Update the goal density
             # Extract the trajectory
 
-            sample_points = torch.tensor(agent.x_arr[:t:3, :] , dtype=torch.float32)
+            [k, idx, dists] = pcloud.pcd_tree.search_radius_vector_3d(
+                agent.x_arr[t, :], param.fov_radius)
+            idx = np.asarray(idx)
+            indices.append(idx) 
+            # Step 1: Concatenate all arrays
+            all_indices = np.concatenate(indices)
+
+            # Step 2: Get unique values
+            unique_indices = np.unique(all_indices)
+
+            sample_points = torch.tensor(pcloud.vertices[unique_indices], dtype=torch.float32)
 
             # Make prediction
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
@@ -190,26 +206,25 @@ def hedac(agent, param, pcloud):
 
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 observed_pred = likelihood(model(test_x))
-            
-
 
             var_tmp = observed_pred.variance.cpu().numpy()
 
             # Set variance to zero along the borders of the point cloud
             border_indices = get_border_indices(pcloud.vertices, param.nb_boundary_neighbors)
 
-            goal_density = (normalize_mat(observed_pred.mean.cpu().numpy()) + normalize_mat(var_tmp)) /2
+            goal_density = (param.alpha_exploit *normalize_mat(observed_pred.mean.cpu().numpy()) +(1-param.alpha_exploit)*normalize_mat(var_tmp)) 
             goal_density[border_indices] = 0
+            gp_val =  (normalize_mat(observed_pred.mean.cpu().numpy()) +(normalize_mat(var_tmp)))/2
 
 
-    return agent.x_arr, heat_arr, coverage_arr, time_arr, goal_density_arr
+    return agent.x_arr, heat_arr, coverage_arr, time_arr, goal_density_arr, gp_arr
 
 point_cloud_dir = "point_clouds/"
 
 # Select the object to explore
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
-obj_name = "rectangular_grid_10k_annotated"  # random IKEA plate with hand-drawn shapes
+obj_name = "rectangular_grid_10k_RLI"  # random IKEA plate with hand-drawn shapes
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
 experiment_index = 2  # choose which initial position to use from x0_arr_10.npz
@@ -218,11 +233,12 @@ class param:
     pass  # c-style struct
 
 
-param.timesteps = 1500  # total simulation timesteps
+param.timesteps = 1000  # total simulation timesteps
 
 # tuning: [1,100] increasing alpha result in global exploration closer to SS
 # decreasing alpha result in local exploration lower limited
-param.alpha = 100
+param.alpha = 10
+param.look_step = 30
 
 param.method = "exact"
 
@@ -233,7 +249,7 @@ param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
 param.max_velocity = 1 * param.voxel_size
-param.max_acceleration = 1 * param.max_velocity
+param.max_acceleration = 2 * param.max_velocity
 
 # tuning: doesn't have much effect on exploration so we keep it at 1
 param.source_strength = 1
@@ -247,6 +263,9 @@ param.nb_minimum_neighbors = 20
 # setting this higher in bunny results in the right ear being considered as part
 # of the main body
 param.nb_boundary_neighbors = 40
+
+param.alpha_exploit = 0.45
+param.fov_radius = 0.1
 
 
 # Select the object and load the point cloud
@@ -335,32 +354,36 @@ mean = observed_pred.mean.cpu().numpy()
 camera = dict(
     up=dict(x=0, y=1, z=0),
     center=dict(x=0, y=0, z=0),
-    eye=dict(x=0, y=0.7, z=1.25)
+    eye=dict(x=0, y=-0.7, z=-1.25)
 )
-plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean)
-fig = go.Figure(plot)
-update_figure(fig)
-fig.update_layout(
-    scene_camera=camera
-)
+# plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean)
+# fig = go.Figure(plot)
+# update_figure(fig)
+# fig.update_layout(
+#     scene_camera=camera
+# )
 
-fig.show('browser')
+# fig.show('browser')
 
 agent = SecondOrderAgent(
-    x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity,max_acceleration=param.max_acceleration*2
+    x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity,max_acceleration=param.max_acceleration
 )
+
+# agent = FirstOrderAgent(
+#     x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity
+# )
 
 random_vertex = np.random.randint(0,len(pcloud.vertices))
 agent.x = pcloud.vertices[1000]
 agent.radius = param.agent_radius
 
 
-x_arr, heat_arr, coverage_arr, time_arr, goal_arr = hedac(agent, param, pcloud)
+x_arr, heat_arr, coverage_arr, time_arr, goal_arr,gp_arr = hedac(agent, param, pcloud)
 
 
 
 import plotly.io as pio
 
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=goal_arr, timesteps=param.timesteps, save_path="pl_3dk_target_distribution.html")
+animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=gp_arr, timesteps=param.timesteps, save_path="pl_3dk_target_distribution.html")
 
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=heat_arr, timesteps=param.timesteps, save_path="pl_3dk_goal_density.html")
+# animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=heat_arr, timesteps=param.timesteps, save_path="pl_3dk_goal_density.html")
