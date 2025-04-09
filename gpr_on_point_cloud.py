@@ -5,7 +5,7 @@ import scipy.sparse.linalg as sla
 import plotly.graph_objects as go
 import time
 
-device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # print("Using device: ", device)
 torch.set_default_device(device)
 

@@ -23,7 +23,7 @@ np.set_printoptions(formatter={"float": lambda x: "{0:0.3e}".format(x)})
 
 import time
 import torch
-device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # print("Using device: ", device)
 torch.set_default_device(device)
 
@@ -68,7 +68,7 @@ def hedac(agent, param, pcloud):
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
         gpr_original_density = likelihood_real(model_real(sample_points))
 
-    density_sample = gpr_original_density.mean.cpu()
+    density_sample = gpr_original_density.mean
     # print(stiffness_sample)
     # Construct training data
     train_x = sample_points.clone()
@@ -89,7 +89,7 @@ def hedac(agent, param, pcloud):
     model.eval()
     likelihood.eval()
 
-    test_x = torch.tensor(pcloud.vertices, dtype=torch.float32)
+    test_x = torch.tensor(pcloud.vertices, dtype=torch.float32, device=device)
 
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
         observed_pred = likelihood(model(test_x))
@@ -103,13 +103,6 @@ def hedac(agent, param, pcloud):
     # we keep this and add coverage at each timestep on top of it
     coverage = np.zeros_like(goal_density)
     
-    # plot the initial goal density
-    plot = plot_point_cloud(test_x, point_colors=coverage)
-    fig = go.Figure(plot)
-    update_figure(fig)
-    fig.update_layout(
-        scene_camera=camera
-    )
 
     fig.show('browser')
     # for keeping the runtime of each timestep
@@ -164,13 +157,13 @@ def hedac(agent, param, pcloud):
             print(f"Time step: {t}/{param.timesteps}")
             # Update the goal density
             # Extract the trajectory
-            sample_points = torch.tensor(agent.x_arr[:t:3, :] , dtype=torch.float32)
+            sample_points = torch.tensor(agent.x_arr[:t:3, :] , dtype=torch.float32, device=device)
 
             # Make prediction
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 gpr_original_density = likelihood_real(model_real(sample_points))
             
-            density_sample = gpr_original_density.mean.cpu()
+            density_sample = gpr_original_density.mean
 
             # Construct training data
             train_x = sample_points.clone()
@@ -259,8 +252,8 @@ param.voxel_size = 0.003
 param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
-param.max_velocity = 1 * param.voxel_size
-param.max_acceleration = 1 * param.max_velocity
+param.max_velocity = 0.1 * param.voxel_size
+param.max_acceleration = 1.0 * param.max_velocity
 
 # tuning: doesn't have much effect on exploration so we keep it at 1
 param.source_strength = 1
