@@ -28,18 +28,55 @@ import torch
 device = torch.device("cpu")
 # print("Using device: ", device)
 torch.set_default_device(device)
-
-
-
 import robust_laplacian
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import splu
+from scipy.stats import multivariate_normal
 
 from gpr_on_point_cloud import *
 from plotting_utils import *
 from pointcloud_utils import *
 from virtual_agents import FirstOrderAgent, SecondOrderAgent
 
+
+class param:
+    pass  # c-style struct
+
+
+param.timesteps = 800  # total simulation timesteps
+
+# tuning: [1,100] increasing alpha result in global exploration closer to SS
+# decreasing alpha result in local exploration lower limited
+param.alpha = 100
+
+param.method = "exact"
+
+# voxel filter size for downsampling the point cloud
+param.voxel_size = 0.02
+# radius for the agent footprint that'd be used in coverage
+param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
+# param.agent_radius = 5 * param.voxel_size  # for the plate
+# define speed and acceleration in terms of voxel size
+param.max_velocity = 1 * param.voxel_size
+param.max_acceleration = 2 * param.max_velocity
+
+# tuning: doesn't have much effect on exploration so we keep it at 1
+param.source_strength = 1
+
+# max. num. of neighbors to consider for computing the neighbors in agent radius
+param.nb_max_neighbors = 500
+# num. of neighbors to consider for tangent space and gradient computation
+param.nb_minimum_neighbors = 20
+# num. of neighbors to consider for implicitly determining the boundary
+# setting this lower in bunny resutls in right ear considered as a seperate body
+# setting this higher in bunny results in the right ear being considered as part
+# of the main body
+param.nb_boundary_neighbors = 40
+
+param.alpha_exploit = 0.25
+param.fov_radius = 0.075
+param.beta = 0.5
+param.look_step = 50
 
 def hedac(agent, param, pcloud):
     """
@@ -208,14 +245,15 @@ def hedac(agent, param, pcloud):
                 observed_pred = likelihood(model(test_x))
 
             var_tmp = observed_pred.variance.cpu().numpy()
+            mean_tmp = observed_pred.mean.cpu().numpy()
 
             # Set variance to zero along the borders of the point cloud
             border_indices = get_border_indices(pcloud.vertices, param.nb_boundary_neighbors)
 
-            goal_density = (param.alpha_exploit *normalize_mat(observed_pred.mean.cpu().numpy()) +(1-param.alpha_exploit)*normalize_mat(var_tmp)) 
+            weighted_gp = normalize_mat(param.alpha_exploit * normalize_mat(mean_tmp) +(1-param.alpha_exploit)* normalize_mat(var_tmp))
+            goal_density = normalize_mat(param.beta  * normalize_mat(pcloud.u_ht) + (1-param.beta) * weighted_gp)
             goal_density[border_indices] = 0
-            gp_val =  (normalize_mat(observed_pred.mean.cpu().numpy()) +(normalize_mat(var_tmp)))/2
-
+            gp_val =  (normalize_mat(mean_tmp) +(normalize_mat(var_tmp)))/2
 
     return agent.x_arr, heat_arr, coverage_arr, time_arr, goal_density_arr, gp_arr
 
@@ -226,47 +264,6 @@ point_cloud_dir = "point_clouds/"
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
 obj_name = "rectangular_grid_10k_RLI"  # random IKEA plate with hand-drawn shapes
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
-
-experiment_index = 2  # choose which initial position to use from x0_arr_10.npz
-
-class param:
-    pass  # c-style struct
-
-
-param.timesteps = 1000  # total simulation timesteps
-
-# tuning: [1,100] increasing alpha result in global exploration closer to SS
-# decreasing alpha result in local exploration lower limited
-param.alpha = 10
-param.look_step = 30
-
-param.method = "exact"
-
-# voxel filter size for downsampling the point cloud
-param.voxel_size = 0.02
-# radius for the agent footprint that'd be used in coverage
-param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
-# param.agent_radius = 5 * param.voxel_size  # for the plate
-# define speed and acceleration in terms of voxel size
-param.max_velocity = 1 * param.voxel_size
-param.max_acceleration = 2 * param.max_velocity
-
-# tuning: doesn't have much effect on exploration so we keep it at 1
-param.source_strength = 1
-
-# max. num. of neighbors to consider for computing the neighbors in agent radius
-param.nb_max_neighbors = 500
-# num. of neighbors to consider for tangent space and gradient computation
-param.nb_minimum_neighbors = 20
-# num. of neighbors to consider for implicitly determining the boundary
-# setting this lower in bunny resutls in right ear considered as a seperate body
-# setting this higher in bunny results in the right ear being considered as part
-# of the main body
-param.nb_boundary_neighbors = 40
-
-param.alpha_exploit = 0.45
-param.fov_radius = 0.1
-
 
 # Select the object and load the point cloud
 # ==========================================
@@ -281,13 +278,7 @@ pcloud.C, pcloud.M = robust_laplacian.point_cloud_laplacian(
 A = csc_matrix(pcloud.M + pcloud.dt * pcloud.C)  # Ensure sparse format
 pcloud.A_factorized = splu(A)  # LU factorization
 
-
-import os
-
 import gpytorch
-import matplotlib.cm as cm
-import matplotlib.pyplot as plt
-import open3d as o3d
 
 # Define the goal density
 # ========================
@@ -350,13 +341,49 @@ with torch.no_grad():
 end = time.time()
 print(f"Time to predict: {end - start}")
 mean = observed_pred.mean.cpu().numpy()
-# var = observed_pred.variance.cpu().numpy()
-camera = dict(
-    up=dict(x=0, y=1, z=0),
-    center=dict(x=0, y=0, z=0),
-    eye=dict(x=0, y=-0.7, z=-1.25)
+var = observed_pred.variance.cpu().numpy()
+
+
+# agent = SecondOrderAgent(
+#     x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity,max_acceleration=param.max_acceleration
+# )
+
+agent = FirstOrderAgent(
+    x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity
 )
+
+random_vertex = np.random.randint(0,len(pcloud.vertices))
+agent.x = pcloud.vertices[1000]
+agent.radius = param.agent_radius
+
+# Gaussian centers
+centers = np.array([
+    [0.17, 0.78],
+    [0.62, 0.62],
+    [0.439, 0.237]
+])
+
+# Example: Use the same covariance matrix for all
+cov = np.array([[0.01, 0], [0, 0.01]])  # isotropic, adjust for spread
+
+from scipy.stats import multivariate_normal
+
+points = pcloud.vertices[:,:2]
+# Evaluate Gaussians
+values = np.zeros(len(points))
+for mu in centers:
+    rv = multivariate_normal(mean=mu, cov=cov)
+    values += rv.pdf(points)  # sum the densities
+
+pcloud.u_ht = values # Gaussian target
+
+# camera = dict(
+#     up=dict(x=0, y=1, z=0),
+#     center=dict(x=0, y=0, z=0),
+#     eye=dict(x=0, y=0, z=1.2)
+# )
 # plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean)
+# # plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=pcloud.u_ht)
 # fig = go.Figure(plot)
 # update_figure(fig)
 # fig.update_layout(
@@ -365,25 +392,10 @@ camera = dict(
 
 # fig.show('browser')
 
-agent = SecondOrderAgent(
-    x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity,max_acceleration=param.max_acceleration
-)
-
-# agent = FirstOrderAgent(
-#     x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity
-# )
-
-random_vertex = np.random.randint(0,len(pcloud.vertices))
-agent.x = pcloud.vertices[1000]
-agent.radius = param.agent_radius
-
-
 x_arr, heat_arr, coverage_arr, time_arr, goal_arr,gp_arr = hedac(agent, param, pcloud)
 
+u_ht_arr= np.tile(pcloud.u_ht[:, np.newaxis], (1, heat_arr.shape[-1]))
 
+animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=gp_arr, timesteps=param.timesteps,circle_radius=param.fov_radius, look_step=param.look_step, save_path="pl_3dk_gp.html")
+animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=u_ht_arr, timesteps=param.timesteps,circle_radius=param.fov_radius, look_step=param.look_step, save_path="pl_3dk_target_distribution.html")
 
-import plotly.io as pio
-
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=gp_arr, timesteps=param.timesteps, save_path="pl_3dk_target_distribution.html")
-
-# animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=heat_arr, timesteps=param.timesteps, save_path="pl_3dk_goal_density.html")

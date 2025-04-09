@@ -1,9 +1,10 @@
-import torch 
+import time
+
 import gpytorch
+import plotly.graph_objects as go
 import robust_laplacian
 import scipy.sparse.linalg as sla
-import plotly.graph_objects as go
-import time
+import torch
 
 device = torch.device("cpu")
 # print("Using device: ", device)
@@ -114,9 +115,9 @@ def plot_point_cloud(points, point_colors=None, **kwargs):
         z=points[:, 2],
         mode='markers',
         marker=dict(
-            size=2,
+            size=10,
             color=point_colors,
-            colorscale='Inferno',
+            colorscale='bluered',
             opacity=0.8,
             showscale=True
         ),

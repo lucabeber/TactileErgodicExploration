@@ -251,7 +251,7 @@ def streamline_plot(
     else:
         return plots
 
-def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, save_path=None):
+def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, circle_radius=0.1,look_step=50, save_path=None):
     point_size = 10
     # Set the camera
     camera_params = dict(
@@ -280,15 +280,24 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, save_pat
         x=[x_arr[0, 0]],
         y=[x_arr[0, 1]],
         z=[x_arr[0, 2]],
-        mode="lines",
-        line=dict(width=10, color="black"),
+        mode="markers",
+        marker=dict(size=10, color="yellow"),
         name="Trajectory",
         opacity=0.3,  # Set the opacity of the line
+    )
+    # Add a dummy circle to start, even if invisible
+    empty_circle = go.Scatter3d(
+        x=[],
+        y=[],
+        z=[],
+        mode='lines',
+        line=dict(dash='dash', color='red', width=4),
+        name='Circle'
     )
 
     # Create Figure
     fig = go.Figure(
-        data=[point_cloud, trajectory],  
+        data=[point_cloud, trajectory,empty_circle],  
         layout=go.Layout(
             scene=dict(
                 xaxis=dict(visible=False),
@@ -303,41 +312,69 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, save_pat
 
     # Animation Frames (Update Trajectory + Colors)
     timestep_multiplier = 10
-    n_frames = timesteps // timestep_multiplier + 1  
-    frames = [
-        go.Frame(
-            data=[
-                # Update point cloud color
-                go.Scatter3d(
-                    x=vertices[:, 0],
-                    y=vertices[:, 1],
-                    z=vertices[:, 2],
-                    mode="markers",
-                    marker=dict(
-                        size=point_size,
-                        opacity=0.8,
-                        color=color_frames[...,k*timestep_multiplier-1],  # Update colors
-                        colorscale="bluered",
-                    ),
-                    name="Reconstructed Target",
-                ),
-                # Update trajectory
-                go.Scatter3d(
-                    x=x_arr[: k * timestep_multiplier, 0],
-                    y=x_arr[: k * timestep_multiplier, 1],
-                    z=x_arr[: k * timestep_multiplier, 2],
-                    mode="lines",
-                    line=dict(width=10, color="black"),
-                    name="Trajectory",
-                    opacity=0.3,  # Set the opacity of the line
-                )
-            ],
+    n_frames = timesteps // timestep_multiplier  
+
+    # Precompute unit circle in x-y plane
+    theta = np.linspace(0, 2 * np.pi, 50)
+    unit_circle = np.stack([np.cos(theta), np.sin(theta), np.zeros_like(theta)], axis=1) * circle_radius  # radius 0.1
+    all_circle_points = []
+
+    # Build frames with optional circle overlay
+    frames = []
+    for k in range(n_frames):
+        frame_data = []
+
+        # Point cloud with updated color
+        frame_data.append(go.Scatter3d(
+            x=vertices[:, 0],
+            y=vertices[:, 1],
+            z=vertices[:, 2],
+            mode="markers",
+            marker=dict(
+                size=point_size,
+                opacity=0.9,
+                color=color_frames[..., k * timestep_multiplier - 1],
+                colorscale="bluered",
+            ),
+            name="Reconstructed Target",
+        ))
+
+        # Trajectory so far
+        frame_data.append(go.Scatter3d(
+            x=x_arr[:k * timestep_multiplier, 0],
+            y=x_arr[:k * timestep_multiplier, 1],
+            z=x_arr[:k * timestep_multiplier, 2],
+            mode="lines",
+            line=dict(width=5, color="black"),
+            name="Trajectory",
+            opacity=0.4,
+        ))
+
+        # Optional: Add dashed circle every 30 steps (but not at frame 0)
+        if (k * timestep_multiplier) % look_step == 0 and k > 0:
+            center = x_arr[k * timestep_multiplier]
+            circle_points = unit_circle + center  # shape (100, 3)
+            all_circle_points.append(circle_points)
+            circle_points = np.array(all_circle_points).reshape(-1,3)
+
+            frame_data.append(go.Scatter3d(
+                x=circle_points[:, 0],
+                y=circle_points[:, 1],
+                z=circle_points[:, 2],
+                mode='markers',
+                marker=dict(size = 2, color='yellow',opacity = 0.9),
+                name='Circle'
+            ))
+            trace_ids = [0, 1, 2]
+        else:
+            trace_ids = [0, 1, 2]
+
+        # Add frame
+        frames.append(go.Frame(
+            data=frame_data,
             name=f"frame{k}",
-            traces=[0, 1],  # Update both point cloud (0) and trajectory (1)
-        )
-        for k in range(n_frames)
-    ]
-    
+            traces=trace_ids
+        ))
     fig.update(frames=frames)
 
     # Sliders
