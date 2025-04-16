@@ -1,20 +1,20 @@
 """
-    Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
-    Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
+Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
+Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
 
-    This file is part of tactileErgodicExploration.
+This file is part of tactileErgodicExploration.
 
-    tactileErgodicExploration is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License version 3 as
-    published by the Free Software Foundation.
+tactileErgodicExploration is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License version 3 as
+published by the Free Software Foundation.
 
-    tactileErgodicExploration is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-    GNU General Public License for more details.
+tactileErgodicExploration is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with tactileErgodicExploration. If not, see <http://www.gnu.org/licenses/>.
+You should have received a copy of the GNU General Public License
+along with tactileErgodicExploration. If not, see <http://www.gnu.org/licenses/>.
 """
 
 import numpy as np
@@ -46,6 +46,8 @@ def compute_coverage_residual(initial_heat_arr, coverage_arr):
     )
 
     return normalized_residual
+
+
 def normalize_mat(mat):
     """
     Normalize a matrix by dividing each element by the sum of all elements in the
@@ -81,7 +83,7 @@ def process_point_cloud(filename, param):
     )
     # set the exploration target using the 'red' channel of the point cloud
     u0 = colors[:, 1]
-    pcloud.u0 = u0 #np.where(u0 < 1, 0, 255)
+    pcloud.u0 = u0  # np.where(u0 < 1, 0, 255)
     # compute the K-D tree for the nearest neighbor queries later
     pcloud.pcd_tree = o3d.geometry.KDTreeFlann(pcd)
 
@@ -155,40 +157,98 @@ def calculate_dt(vertices, m=1):
     dt = m * h**2
     return dt, h
 
+
+# def compute_tangent_space(neighbor_coords):
+#     """
+#     Compute tangent and normal vectors using PCA.
+
+#     Parameters:
+#     -----------
+#     neighbor_coords: (N, 3) array
+#         Local neighborhood points.
+
+#     Returns:
+#     --------
+#     Tuple:
+#         normal_vector (3,),
+#         tangent_vector1 (3,),
+#         tangent_vector2 (3,)
+#     """
+#     # Center the neighborhood
+#     print(neighbor_coords)
+#     centroid = np.mean(neighbor_coords, axis=0)
+#     centered = neighbor_coords - centroid
+
+#     # PCA via SVD
+#     U, S, Vt = np.linalg.svd(centered, full_matrices=False)
+
+#     # The right-singular vectors (rows of Vt) are the directions
+#     # The smallest singular value corresponds to the normal
+#     tangent_vector1 = Vt[0]
+#     tangent_vector2 = Vt[1]
+#     normal_vector = Vt[2]
+
+
+#     return normal_vector, tangent_vector1, tangent_vector2
 def compute_tangent_space(neighbor_coords):
     """
-    Compute tangent and normal vectors using PCA.
+    Compute the tangent space of a local neighborhood.
 
     Parameters:
     -----------
-    neighbor_coords: (N, 3) array
-        Local neighborhood points.
+    neighbor_coords: numpy.ndarray
+        The coordinates of the neighboring points.
 
     Returns:
     --------
-    Tuple:
-        normal_vector (3,),
-        tangent_vector1 (3,),
-        tangent_vector2 (3,)
+    Tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray]
+        The normal vector, tangent vector 1, and tangent vector 2.
     """
-    # Center the neighborhood
-    centroid = np.mean(neighbor_coords, axis=0)
-    centered = neighbor_coords - centroid
+    # Step 1: Fit a plane to the local neighborhood using least squares
+    # plane equation ax + by + c = z, plane equation is similar to the line equation
+    # y = ax+b this is why we don't have a coefficient for z in the plane equation
+    # A = [x y 1]
+    # x = [a b c]T
+    # b = z
+    A = np.column_stack(
+        [
+            neighbor_coords[:, 0],
+            neighbor_coords[:, 1],
+            np.ones_like(neighbor_coords[:, 0]),
+        ]
+    )
+    b = neighbor_coords[:, 2]  # z coords.
+    coefficients, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
 
-    # PCA via SVD
-    U, S, Vt = np.linalg.svd(centered, full_matrices=False)
+    # Step 2: Compute the normal vector of the fitted plane
+    # this is the gradient of the plane equation
 
-    # The right-singular vectors (rows of Vt) are the directions
-    # The smallest singular value corresponds to the normal
-    tangent_vector1 = Vt[0]
-    tangent_vector2 = Vt[1]
-    normal_vector = Vt[2]
+    normal_vector = np.array([coefficients[0], coefficients[1], -1.0])
 
-    return normal_vector, tangent_vector1, tangent_vector2
+    # Step 3: Choose two tangent vectors in the tangent plane
+    # u-axis is perp to the normal -> dot product is 0
+    tangent_vector1 = np.array([-coefficients[1], coefficients[0], 0])  # u-axis
+
+    # second tangent vector is perp to the normal and to the first tangent vector
+    tangent_vector2 = np.cross(normal_vector, tangent_vector1)  # v-axis
+
+    # Step 4: Normalize the vectors
+    tangent_vector1 /= np.linalg.norm(tangent_vector1)
+    tangent_vector2 /= np.linalg.norm(tangent_vector2)
+    normal_vector /= np.linalg.norm(normal_vector)
+
+    return (
+        coefficients,
+        normal_vector,
+        tangent_vector1,
+        tangent_vector2,
+    )
+
 
 def project_points2tangent_space(
     agent_coords,
     neighbor_coords,
+    coefficients,
     normal_vector,
     tangent_vector_1,
     tangent_vector_2,
@@ -222,7 +282,7 @@ def project_points2tangent_space(
     # plane_point = np.average(coords, axis=0)
     # plane equation: ax + by + c = z
     # get a point on the plane, set x = y = 0 -> c = z
-    plane_point = agent_coords
+    plane_point = np.array([0, 0, coefficients[2]])
 
     projected_agent_positon = (
         agent_coords - np.dot(agent_coords - plane_point, normal_vector) * normal_vector
@@ -246,6 +306,68 @@ def project_points2tangent_space(
         projected_points[1:, :],
         uv_coords[1:, :],
     )
+
+
+# def project_points2tangent_space(
+#     agent_coords,
+#     neighbor_coords,
+#     normal_vector,
+#     tangent_vector_1,
+#     tangent_vector_2,
+# ):
+#     """
+#     Project the points onto the tangent space.
+
+#     Parameters:
+#     -----------
+#     agent_coords: numpy.ndarray
+#         The coordinates of the agent point.
+#     neighbor_coords: numpy.ndarray
+#         The coordinates of the neighboring points.
+#     normal_vector: numpy.ndarray
+#         The normal vector of the tangent plane.
+#     tangent_vector_1: numpy.ndarray
+#         The first tangent vector of the tangent plane.
+#     tangent_vector_2: numpy.ndarray
+#         The second tangent vector of the tangent plane.
+
+#     Returns:
+#     --------
+#     Tuple[numpy.ndarray, numpy.ndarray]
+#         The projected points and the UV coordinates.
+#     """
+#     coords = np.zeros((neighbor_coords.shape[0] + 1, 3))
+#     coords[0, :] = agent_coords
+#     coords[1:, :] = neighbor_coords
+#     projected_points = np.zeros_like(coords)
+#     uv_coords = np.zeros((coords.shape[0], 2))
+#     # plane_point = np.average(coords, axis=0)
+#     # plane equation: ax + by + c = z
+#     # get a point on the plane, set x = y = 0 -> c = z
+#     plane_point = agent_coords
+
+#     projected_agent_positon = (
+#         agent_coords - np.dot(agent_coords - plane_point, normal_vector) * normal_vector
+#     )
+
+#     for i in range(1, coords.shape[0]):
+#         projected_points[i, :] = (
+#             coords[i, :]
+#             - np.dot(coords[i, :] - plane_point, normal_vector) * normal_vector
+#         )
+#         uv_coords[i, 0] = np.dot(
+#             projected_points[i, :] - projected_agent_positon,
+#             tangent_vector_1,
+#         )
+#         uv_coords[i, 1] = np.dot(
+#             projected_points[i, :] - projected_agent_positon,
+#             tangent_vector_2,
+#         )
+#     return (
+#         projected_agent_positon,
+#         projected_points[1:, :],
+#         uv_coords[1:, :],
+#     )
 
 
 def fit_poly_surface(uv_coords, values, degree=3):
@@ -273,7 +395,9 @@ def fit_poly_surface(uv_coords, values, degree=3):
     eps = 1 / (np.max(dists) + 1e-8)
     weights = np.exp(-eps * dists**2)
 
-    x = np.vstack([uv_centered[:, 0], uv_centered[:, 1], np.ones_like(uv_centered[:, 0])]).T
+    x = np.vstack(
+        [uv_centered[:, 0], uv_centered[:, 1], np.ones_like(uv_centered[:, 0])]
+    ).T
     poly = PolynomialFeatures(degree)
     X = poly.fit_transform(x)
 
@@ -282,6 +406,7 @@ def fit_poly_surface(uv_coords, values, degree=3):
     # Weighted least squares
     coeffs, *_ = np.linalg.lstsq(X * weights[:, None], y * weights, rcond=None)
     return coeffs, X
+
 
 def get_gradient_3rd_degree_polynomial(uv_coords, c, return_neighbors=False):
     """
@@ -371,11 +496,9 @@ def get_gradient(
     numpy.ndarray
         The gradient vectors at each vertex.
     """
-    (
-        normal_vector,
-        tangent_vector_1,
-        tangent_vector_2,
-    ) = compute_tangent_space(neighbor_coords)
+    (coeffs, normal_vector, tangent_vector_1, tangent_vector_2) = compute_tangent_space(
+        neighbor_coords
+    )
 
     (
         projected_agent_positon,
@@ -384,6 +507,7 @@ def get_gradient(
     ) = project_points2tangent_space(
         agent_position,
         neighbor_coords,
+        coeffs,
         normal_vector,
         tangent_vector_1,
         tangent_vector_2,
@@ -454,6 +578,7 @@ def get_pcloud_neighbors(
         [k, idx, dists] = pcd_tree.search_knn_vector_3d(
             agent_position, nb_minimum_neighbors
         )
+        print(idx)
 
     neighbor_ids = np.asarray(idx)
     dists = np.asarray(dists)

@@ -1,20 +1,20 @@
 """
-    Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
-    Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
+Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
+Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
 
-    This file is part of tactileErgodicExploration.
+This file is part of tactileErgodicExploration.
 
-    tactileErgodicExploration is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License version 3 as
-    published by the Free Software Foundation.
+tactileErgodicExploration is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License version 3 as
+published by the Free Software Foundation.
 
-    tactileErgodicExploration is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-    GNU General Public License for more details.
+tactileErgodicExploration is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with tactileErgodicExploration. If not, see <http://www.gnu.org/licenses/>.
+You should have received a copy of the GNU General Public License
+along with tactileErgodicExploration. If not, see <http://www.gnu.org/licenses/>.
 """
 
 import numpy as np
@@ -35,29 +35,34 @@ from scipy.stats import multivariate_normal
 
 from gpr_on_point_cloud import *
 from plotting_utils import *
+from pointcloud import Pointcloud
+from pointcloud_scalar_diffusion import PointcloudScalarDiffusion
 from pointcloud_utils import *
 from virtual_agents import FirstOrderAgent, SecondOrderAgent
+
+print(o3d.__version__)
 
 
 class param:
     pass  # c-style struct
 
 
-param.timesteps = 800  # total simulation timesteps
+param.timesteps = 1500  # total simulation timesteps
 
 # tuning: [1,100] increasing alpha result in global exploration closer to SS
 # decreasing alpha result in local exploration lower limited
-param.alpha = 100
+param.alpha = 1000
 
 param.method = "exact"
 
 # voxel filter size for downsampling the point cloud
-param.voxel_size = 0.02
+# param.voxel_size = 0.02
+param.voxel_size = 0.003
 # radius for the agent footprint that'd be used in coverage
-param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
+param.agent_radius = 2.5 * param.voxel_size  # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
-param.max_velocity = 1 * param.voxel_size
+param.max_velocity = 0.5 * param.voxel_size
 param.max_acceleration = 2 * param.max_velocity
 
 # tuning: doesn't have much effect on exploration so we keep it at 1
@@ -66,25 +71,26 @@ param.source_strength = 1
 # max. num. of neighbors to consider for computing the neighbors in agent radius
 param.nb_max_neighbors = 500
 # num. of neighbors to consider for tangent space and gradient computation
-param.nb_minimum_neighbors = 20
+param.nb_minimum_neighbors = 10
 # num. of neighbors to consider for implicitly determining the boundary
 # setting this lower in bunny resutls in right ear considered as a seperate body
 # setting this higher in bunny results in the right ear being considered as part
 # of the main body
 param.nb_boundary_neighbors = 40
 
-param.alpha_exploit = 0.25
+param.alpha_exploit = 0.2
 param.fov_radius = 0.075
-param.beta = 0.5
+param.beta = 0.0
 param.look_step = 50
+
 
 def hedac(agent, param, pcloud):
     """
     Perform HEDAC exploration using the agent and the point cloud.
 
     Original implementation on a 2-D rectangular grid by Ivic et al.
-    Ivić, S., Crnković, B., & Mezić, I. (2017). Ergodicity-Based Cooperative 
-    Multiagent Area Coverage via a Potential Field. IEEE Transactions on 
+    Ivić, S., Crnković, B., & Mezić, I. (2017). Ergodicity-Based Cooperative
+    Multiagent Area Coverage via a Potential Field. IEEE Transactions on
     Cybernetics, 47(8), 1983–1993. https://doi.org/10.1109/TCYB.2016.2634400
 
     Args:
@@ -101,7 +107,7 @@ def hedac(agent, param, pcloud):
     heat_arr = np.zeros_like(coverage_arr)
     goal_density_arr = np.zeros_like(coverage_arr)
     gp_arr = np.zeros_like(coverage_arr)
-    
+
     # Initialize goal density
     sample_points = torch.tensor(agent.x, dtype=torch.float32).reshape(1, -1)
     # Make prediction
@@ -121,7 +127,6 @@ def hedac(agent, param, pcloud):
     model.train()
     likelihood.train()
 
-
     # Get into evaluation (predictive posterior) mode and predict
     model.eval()
     likelihood.eval()
@@ -134,12 +139,12 @@ def hedac(agent, param, pcloud):
     goal_density = observed_pred.mean.cpu().numpy()
 
     # we normalize the goal because it should be a probability distribution
-    goal_density = normalize_mat(goal_density) 
+    goal_density = normalize_mat(goal_density)
     ut = np.array(goal_density)
 
     # we keep this and add coverage at each timestep on top of it
     coverage = np.zeros_like(goal_density)
-    
+
     # plot the initial goal density
     # plot = plot_point_cloud(test_x, point_colors=coverage)
     # fig = go.Figure(plot)
@@ -184,23 +189,41 @@ def hedac(agent, param, pcloud):
         time_arr[t] = time.time() - start_time
 
         ut += param.source_strength * source
+        scalar_diffusion_solver.get_gradient(ut)
         (
             agent.x,
             gradient,
-            _,
+            projected_neighbor_coords,
         ) = get_gradient(
             np.copy(agent.x),
             neighbor_coords,
             neighbor_ids,
             ut,
         )
+        # Interpolate the gradient at the agent location using its closest 5 neighbors' values
+        gradient = np.mean(
+            scalar_diffusion_solver.gradient_ut_3d[neighbor_ids[:10]], axis=0
+        )
+
+        # agent.update(gradient)
+
+        # (
+        #     agent.x,
+        #     gradient,
+        #     _,
+        # ) = get_gradient(
+        #     np.copy(agent.x),
+        #     neighbor_coords,
+        #     neighbor_ids,
+        #     ut,
+        # )
         agent.update(gradient)
 
         coverage_arr[..., t] = coverage
         heat_arr[..., t] = np.copy(ut)
         goal_density_arr[..., t] = goal_density
 
-        gp_arr[...,t] = gp_val
+        gp_arr[..., t] = gp_val
 
         if t % param.look_step == 0 and t > 0:
             print(f"Time step: {t}/{param.timesteps}")
@@ -208,21 +231,24 @@ def hedac(agent, param, pcloud):
             # Extract the trajectory
 
             [k, idx, dists] = pcloud.pcd_tree.search_radius_vector_3d(
-                agent.x_arr[t, :], param.fov_radius)
+                agent.x_arr[t, :], param.fov_radius
+            )
             idx = np.asarray(idx)
-            indices.append(idx) 
+            indices.append(idx)
             # Step 1: Concatenate all arrays
             all_indices = np.concatenate(indices)
 
             # Step 2: Get unique values
             unique_indices = np.unique(all_indices)
 
-            sample_points = torch.tensor(pcloud.vertices[unique_indices], dtype=torch.float32)
+            sample_points = torch.tensor(
+                pcloud.vertices[unique_indices], dtype=torch.float32
+            )
 
             # Make prediction
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 gpr_original_density = likelihood_real(model_real(sample_points))
-            
+
             density_sample = gpr_original_density.mean.cpu()
 
             # Construct training data
@@ -248,27 +274,59 @@ def hedac(agent, param, pcloud):
             mean_tmp = observed_pred.mean.cpu().numpy()
 
             # Set variance to zero along the borders of the point cloud
-            border_indices = get_border_indices(pcloud.vertices, param.nb_boundary_neighbors)
+            # border_indices = get_border_indices(
+            #     pcloud.vertices, param.nb_boundary_neighbors
+            # )
+            border_indices = pcd_helper.is_boundary_arr
 
-            weighted_gp = normalize_mat(param.alpha_exploit * normalize_mat(mean_tmp) +(1-param.alpha_exploit)* normalize_mat(var_tmp))
-            goal_density = normalize_mat(param.beta  * normalize_mat(pcloud.u_ht) + (1-param.beta) * weighted_gp)
+            weighted_gp = normalize_mat(
+                param.alpha_exploit * normalize_mat(mean_tmp)
+                + (1 - param.alpha_exploit) * normalize_mat(var_tmp)
+            )
+            goal_density = normalize_mat(
+                param.beta * normalize_mat(pcloud.u_ht) + (1 - param.beta) * weighted_gp
+            )
             goal_density[border_indices] = 0
-            gp_val =  (normalize_mat(mean_tmp) +(normalize_mat(var_tmp)))/2
+            gp_val = (normalize_mat(mean_tmp) + (normalize_mat(var_tmp))) / 2
 
     return agent.x_arr, heat_arr, coverage_arr, time_arr, goal_density_arr, gp_arr
+
 
 point_cloud_dir = "point_clouds/"
 
 # Select the object to explore
 
-# obj_name = "bun270_X" # Stanford bunny with X projected as the target
-obj_name = "rectangular_grid_10k_RLI"  # random IKEA plate with hand-drawn shapes
-# obj_name = "cup_X" # random cup that we scanned with X projected as the target
+# obj_name = "bun270_X"  # Stanford bunny with X projected as the target
+# obj_name = "rectangular_grid_10k_RLI"  # random IKEA plate with hand-drawn shapes
+obj_name = "pointcloud_0"  # random IKEA plate with hand-drawn shapes
+# obj_name = "cup_X"  # random cup that we scanned with X projected as the target
 
 # Select the object and load the point cloud
 # ==========================================
 filename = f"{point_cloud_dir}{obj_name}.ply"
 pcloud = process_point_cloud(filename, param)
+pcd_helper = Pointcloud(pcloud.vertices)
+boundary_normals = pcd_helper.get_boundary_normals()
+
+u0 = np.zeros(len(pcloud.vertices))
+u0[pcd_helper.is_boundary_arr] = 1
+
+scalar_diffusion_solver = PointcloudScalarDiffusion(pcloud=pcd_helper)
+
+fig = visualize_point_cloud(
+    pcloud.vertices,
+    colors=u0,
+    is_show_plot=True,
+)
+fig.show()
+
+fig = visualize_gradient_field(
+    pcloud.vertices[pcd_helper.is_boundary_arr],
+    gradient_arr=boundary_normals,
+    sizeref=10,
+    is_show_plot=True,
+)
+fig.show()
 
 
 pcloud.C, pcloud.M = robust_laplacian.point_cloud_laplacian(
@@ -311,6 +369,7 @@ def get_border_indices(vertices, nb_boundary_neighbors):
 
     return border_indices
 
+
 # Load gp on pc class
 # ====================
 l = 0.002
@@ -352,30 +411,26 @@ agent = FirstOrderAgent(
     x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity
 )
 
-random_vertex = np.random.randint(0,len(pcloud.vertices))
-agent.x = pcloud.vertices[1000]
+random_vertex = np.random.randint(0, len(pcloud.vertices))
+agent.x = pcloud.vertices[100]
 agent.radius = param.agent_radius
 
 # Gaussian centers
-centers = np.array([
-    [0.17, 0.78],
-    [0.62, 0.62],
-    [0.439, 0.237]
-])
+centers = np.array([[0.17, 0.78], [0.62, 0.62], [0.439, 0.237]])
 
 # Example: Use the same covariance matrix for all
 cov = np.array([[0.01, 0], [0, 0.01]])  # isotropic, adjust for spread
 
 from scipy.stats import multivariate_normal
 
-points = pcloud.vertices[:,:2]
+points = pcloud.vertices[:, :2]
 # Evaluate Gaussians
 values = np.zeros(len(points))
 for mu in centers:
     rv = multivariate_normal(mean=mu, cov=cov)
     values += rv.pdf(points)  # sum the densities
 
-pcloud.u_ht = values # Gaussian target
+pcloud.u_ht = values  # Gaussian target
 
 # camera = dict(
 #     up=dict(x=0, y=1, z=0),
@@ -392,10 +447,25 @@ pcloud.u_ht = values # Gaussian target
 
 # fig.show('browser')
 
-x_arr, heat_arr, coverage_arr, time_arr, goal_arr,gp_arr = hedac(agent, param, pcloud)
+x_arr, heat_arr, coverage_arr, time_arr, goal_arr, gp_arr = hedac(agent, param, pcloud)
 
-u_ht_arr= np.tile(pcloud.u_ht[:, np.newaxis], (1, heat_arr.shape[-1]))
+u_ht_arr = np.tile(pcloud.u_ht[:, np.newaxis], (1, heat_arr.shape[-1]))
 
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=gp_arr, timesteps=param.timesteps,circle_radius=param.fov_radius, look_step=param.look_step, save_path="pl_3dk_gp.html")
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=u_ht_arr, timesteps=param.timesteps,circle_radius=param.fov_radius, look_step=param.look_step, save_path="pl_3dk_target_distribution.html")
-
+animate_trajectory_pcloud(
+    x_arr,
+    vertices=pcloud.vertices,
+    color_frames=gp_arr,
+    timesteps=param.timesteps,
+    circle_radius=param.fov_radius,
+    look_step=param.look_step,
+    save_path="pl_3dk_gp.html",
+)
+animate_trajectory_pcloud(
+    x_arr,
+    vertices=pcloud.vertices,
+    color_frames=u_ht_arr,
+    timesteps=param.timesteps,
+    circle_radius=param.fov_radius,
+    look_step=param.look_step,
+    save_path="pl_3dk_target_distribution.html",
+)

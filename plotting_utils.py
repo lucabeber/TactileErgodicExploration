@@ -1,20 +1,20 @@
 """
-    Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
-    Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
+Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
+Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
 
-    This file is part of diffusionVirtualFixtures.
+This file is part of diffusionVirtualFixtures.
 
-    diffusionVirtualFixtures is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License version 3 as
-    published by the Free Software Foundation.
+diffusionVirtualFixtures is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License version 3 as
+published by the Free Software Foundation.
 
-    diffusionVirtualFixtures is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-    GNU General Public License for more details.
+diffusionVirtualFixtures is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with diffusionVirtualFixtures. If not, see <http://www.gnu.org/licenses/>.
+You should have received a copy of the GNU General Public License
+along with diffusionVirtualFixtures. If not, see <http://www.gnu.org/licenses/>.
 """
 
 import numpy as np
@@ -24,7 +24,7 @@ import plotly.graph_objects as go
 
 def show_plot(plots, camera_params=None, showlegend=True):
     layout = go.Layout(scene=dict(aspectmode="data"))
-    fig = go.FigureWidget(data=plots, layout=layout)
+    fig = go.Figure(data=plots, layout=layout)
     if camera_params is None:
         camera_params = dict(
             up=dict(x=0, y=1, z=0),
@@ -150,7 +150,7 @@ def visualize_point_cloud(
     marker = dict(
         size=point_size,
         showscale=True,
-        opacity=0.2,
+        opacity=0.8,
     )
     if colors.ndim == 2:
         # print("3D colors")
@@ -251,7 +251,16 @@ def streamline_plot(
     else:
         return plots
 
-def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, circle_radius=0.1,look_step=50, save_path=None):
+
+def animate_trajectory_pcloud(
+    x_arr,
+    vertices,
+    color_frames,
+    timesteps,
+    circle_radius=0.1,
+    look_step=50,
+    save_path=None,
+):
     point_size = 10
     # Set the camera
     camera_params = dict(
@@ -269,7 +278,7 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, circle_r
         marker=dict(
             size=point_size,
             opacity=0.8,
-            color=color_frames[...,0],  # Use the first frame's colors
+            color=color_frames[..., 0],  # Use the first frame's colors
             colorscale="bluered",
         ),
         name="Reconstructed Target",
@@ -290,14 +299,14 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, circle_r
         x=[],
         y=[],
         z=[],
-        mode='lines',
-        line=dict(dash='dash', color='red', width=4),
-        name='Circle'
+        mode="lines",
+        line=dict(dash="dash", color="red", width=4),
+        name="Circle",
     )
 
     # Create Figure
     fig = go.Figure(
-        data=[point_cloud, trajectory,empty_circle],  
+        data=[point_cloud, trajectory, empty_circle],
         layout=go.Layout(
             scene=dict(
                 xaxis=dict(visible=False),
@@ -312,11 +321,14 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, circle_r
 
     # Animation Frames (Update Trajectory + Colors)
     timestep_multiplier = 10
-    n_frames = timesteps // timestep_multiplier  
+    n_frames = timesteps // timestep_multiplier
 
     # Precompute unit circle in x-y plane
-    theta = np.linspace(0, 2 * np.pi, 50)
-    unit_circle = np.stack([np.cos(theta), np.sin(theta), np.zeros_like(theta)], axis=1) * circle_radius  # radius 0.1
+    theta = np.linspace(0, 2 * np.pi, 40)
+    unit_circle = (
+        np.stack([np.cos(theta), np.sin(theta), np.zeros_like(theta)], axis=1)
+        * circle_radius
+    )  # radius 0.1
     all_circle_points = []
 
     # Build frames with optional circle overlay
@@ -325,56 +337,58 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, circle_r
         frame_data = []
 
         # Point cloud with updated color
-        frame_data.append(go.Scatter3d(
-            x=vertices[:, 0],
-            y=vertices[:, 1],
-            z=vertices[:, 2],
-            mode="markers",
-            marker=dict(
-                size=point_size,
-                opacity=0.9,
-                color=color_frames[..., k * timestep_multiplier - 1],
-                colorscale="bluered",
-            ),
-            name="Reconstructed Target",
-        ))
+        frame_data.append(
+            go.Scatter3d(
+                x=vertices[:, 0],
+                y=vertices[:, 1],
+                z=vertices[:, 2],
+                mode="markers",
+                marker=dict(
+                    size=point_size,
+                    opacity=0.9,
+                    color=color_frames[..., k * timestep_multiplier - 1],
+                    colorscale="bluered",
+                ),
+                name="Reconstructed Target",
+            )
+        )
 
         # Trajectory so far
-        frame_data.append(go.Scatter3d(
-            x=x_arr[:k * timestep_multiplier, 0],
-            y=x_arr[:k * timestep_multiplier, 1],
-            z=x_arr[:k * timestep_multiplier, 2],
-            mode="lines",
-            line=dict(width=5, color="black"),
-            name="Trajectory",
-            opacity=0.4,
-        ))
+        frame_data.append(
+            go.Scatter3d(
+                x=x_arr[: k * timestep_multiplier, 0],
+                y=x_arr[: k * timestep_multiplier, 1],
+                z=x_arr[: k * timestep_multiplier, 2],
+                mode="lines",
+                line=dict(width=5, color="black"),
+                name="Trajectory",
+                opacity=0.4,
+            )
+        )
 
         # Optional: Add dashed circle every 30 steps (but not at frame 0)
         if (k * timestep_multiplier) % look_step == 0 and k > 0:
             center = x_arr[k * timestep_multiplier]
             circle_points = unit_circle + center  # shape (100, 3)
             all_circle_points.append(circle_points)
-            circle_points = np.array(all_circle_points).reshape(-1,3)
+            circle_points = np.array(all_circle_points).reshape(-1, 3)
 
-            frame_data.append(go.Scatter3d(
-                x=circle_points[:, 0],
-                y=circle_points[:, 1],
-                z=circle_points[:, 2],
-                mode='markers',
-                marker=dict(size = 2, color='yellow',opacity = 0.9),
-                name='Circle'
-            ))
+            frame_data.append(
+                go.Scatter3d(
+                    x=circle_points[:, 0],
+                    y=circle_points[:, 1],
+                    z=circle_points[:, 2],
+                    mode="markers",
+                    marker=dict(size=2, color="yellow", opacity=0.5),
+                    name="Circle",
+                )
+            )
             trace_ids = [0, 1, 2]
         else:
             trace_ids = [0, 1, 2]
 
         # Add frame
-        frames.append(go.Frame(
-            data=frame_data,
-            name=f"frame{k}",
-            traces=trace_ids
-        ))
+        frames.append(go.Frame(data=frame_data, name=f"frame{k}", traces=trace_ids))
     fig.update(frames=frames)
 
     # Sliders
@@ -399,11 +413,12 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, circle_r
             transition=dict(duration=0),
             x=0,
             y=0,
-            currentvalue=dict(font=dict(size=12), prefix="frame: ", visible=True, xanchor="center"),
+            currentvalue=dict(
+                font=dict(size=12), prefix="frame: ", visible=True, xanchor="center"
+            ),
             len=1.0,
         )
     ]
-    
 
     fig.update_layout(width=1200, height=800, sliders=sliders)
 
@@ -411,5 +426,3 @@ def animate_trajectory_pcloud(x_arr, vertices, color_frames, timesteps, circle_r
         fig.write_html(save_path)
 
     fig.show()
-
-
