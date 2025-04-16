@@ -731,7 +731,7 @@ class Pointcloud(Manifold):
         )
         # force all the normals point to the same direction: outwards from the object
 
-        self.pcd.orient_normals_consistent_tangent_plane(k=num_neighbors)
+        # self.pcd.orient_normals_consistent_tangent_plane(k=num_neighbors)
 
         normals = np.asarray(self.pcd.normals)
         # outward = self.center_vertex - self.center_point

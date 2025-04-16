@@ -56,8 +56,8 @@ param.alpha = 1000
 param.method = "exact"
 
 # voxel filter size for downsampling the point cloud
-# param.voxel_size = 0.02
-param.voxel_size = 0.003
+param.voxel_size = 0.02
+# param.voxel_size = 0.005
 # radius for the agent footprint that'd be used in coverage
 param.agent_radius = 2.5 * param.voxel_size  # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
@@ -80,7 +80,7 @@ param.nb_boundary_neighbors = 40
 
 param.alpha_exploit = 0.2
 param.fov_radius = 0.075
-param.beta = 0.0
+param.beta = 1.0
 param.look_step = 50
 
 
@@ -136,10 +136,10 @@ def hedac(agent, param, pcloud):
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
         observed_pred = likelihood(model(test_x))
 
-    goal_density = observed_pred.mean.cpu().numpy()
+    # goal_density = observed_pred.mean.cpu().numpy()
 
     # we normalize the goal because it should be a probability distribution
-    goal_density = normalize_mat(goal_density)
+    goal_density = normalize_mat(pcloud.u_ht)
     ut = np.array(goal_density)
 
     # we keep this and add coverage at each timestep on top of it
@@ -205,18 +205,6 @@ def hedac(agent, param, pcloud):
             scalar_diffusion_solver.gradient_ut_3d[neighbor_ids[:10]], axis=0
         )
 
-        # agent.update(gradient)
-
-        # (
-        #     agent.x,
-        #     gradient,
-        #     _,
-        # ) = get_gradient(
-        #     np.copy(agent.x),
-        #     neighbor_coords,
-        #     neighbor_ids,
-        #     ut,
-        # )
         agent.update(gradient)
 
         coverage_arr[..., t] = coverage
@@ -297,9 +285,10 @@ point_cloud_dir = "point_clouds/"
 # Select the object to explore
 
 # obj_name = "bun270_X"  # Stanford bunny with X projected as the target
-# obj_name = "rectangular_grid_10k_RLI"  # random IKEA plate with hand-drawn shapes
-obj_name = "pointcloud_0"  # random IKEA plate with hand-drawn shapes
+obj_name = "rectangular_grid_10k_RLI"  # random IKEA plate with hand-drawn shapes
+# obj_name = "pointcloud_0"  # random IKEA plate with hand-drawn shapes
 # obj_name = "cup_X"  # random cup that we scanned with X projected as the target
+# obj_name = "plate_shapes"  # random cup that we scanned with X projected as the target
 
 # Select the object and load the point cloud
 # ==========================================
@@ -313,20 +302,20 @@ u0[pcd_helper.is_boundary_arr] = 1
 
 scalar_diffusion_solver = PointcloudScalarDiffusion(pcloud=pcd_helper)
 
-fig = visualize_point_cloud(
-    pcloud.vertices,
-    colors=u0,
-    is_show_plot=True,
-)
-fig.show()
+# fig = visualize_point_cloud(
+#     pcloud.vertices,
+#     colors=u0,
+#     is_show_plot=True,
+# )
+# fig.show()
 
-fig = visualize_gradient_field(
-    pcloud.vertices[pcd_helper.is_boundary_arr],
-    gradient_arr=boundary_normals,
-    sizeref=10,
-    is_show_plot=True,
-)
-fig.show()
+# fig = visualize_gradient_field(
+#     pcloud.vertices[pcd_helper.is_boundary_arr],
+#     gradient_arr=boundary_normals,
+#     sizeref=10,
+#     is_show_plot=True,
+# )
+# fig.show()
 
 
 pcloud.C, pcloud.M = robust_laplacian.point_cloud_laplacian(
@@ -431,6 +420,7 @@ for mu in centers:
     values += rv.pdf(points)  # sum the densities
 
 pcloud.u_ht = values  # Gaussian target
+pcloud.u_ht = np.ones(len(pcloud.vertices))
 
 # camera = dict(
 #     up=dict(x=0, y=1, z=0),
