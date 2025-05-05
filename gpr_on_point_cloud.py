@@ -6,8 +6,8 @@ import plotly.graph_objects as go
 import time
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# print("Using device: ", device)
-torch.set_default_device(device)
+# # print("Using device: ", device)
+# torch.set_default_device(device)
 
 
 def rbf_manifold_kernel(pc, lengthscale=0.01, sigma=1.0, n_eig=100):

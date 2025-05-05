@@ -24,7 +24,7 @@ np.set_printoptions(formatter={"float": lambda x: "{0:0.3e}".format(x)})
 import time
 import torch
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# print("Using device: ", device)
+print("Using device: ", device)
 torch.set_default_device(device)
 
 
@@ -33,11 +33,12 @@ import robust_laplacian
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import splu
 
-from plotting_utils import *
-from pointcloud_utils import *
-from virtual_agents import SecondOrderAgent
-
 from gpr_on_point_cloud import *
+from plotting_utils import *
+from pointcloud import Pointcloud
+from pointcloud_scalar_diffusion import PointcloudScalarDiffusion
+from pointcloud_utils import *
+from virtual_agents import FirstOrderAgent, SecondOrderAgent
 
 def hedac(agent, param, pcloud):
     """
@@ -137,16 +138,34 @@ def hedac(agent, param, pcloud):
         time_arr[t] = time.time() - start_time
 
         ut += param.source_strength * source
+        scalar_diffusion_solver.get_gradient(ut)
         (
             agent.x,
             gradient,
-            _,
+            projected_neighbor_coords,
         ) = get_gradient(
             np.copy(agent.x),
             neighbor_coords,
             neighbor_ids,
             ut,
         )
+        # Interpolate the gradient at the agent location using its closest 5 neighbors' values
+        gradient = np.mean(
+            scalar_diffusion_solver.gradient_ut_3d[neighbor_ids[:10]], axis=0
+        )
+
+        # agent.update(gradient)
+
+        # (
+        #     agent.x,
+        #     gradient,
+        #     _,
+        # ) = get_gradient(
+        #     np.copy(agent.x),
+        #     neighbor_coords,
+        #     neighbor_ids,
+        #     ut,
+        # )
         agent.update(gradient)
 
         coverage_arr[..., t] = coverage
@@ -157,8 +176,8 @@ def hedac(agent, param, pcloud):
             print(f"Time step: {t}/{param.timesteps}")
             # Update the goal density
             # Extract the trajectory
-            sample_points = torch.tensor(agent.x_arr[:t:3, :] , dtype=torch.float32, device=device)
-
+            sample_points = torch.tensor(agent.x_arr[:t:10, :] , dtype=torch.float32, device=device)
+            print(sample_points.shape)
             # Make prediction
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 gpr_original_density = likelihood_real(model_real(sample_points))
@@ -229,7 +248,7 @@ point_cloud_dir = "point_clouds/"
 # Select the object to explore
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
-obj_name = "plate_shapes"  # random IKEA plate with hand-drawn shapes
+obj_name = "processed_pointcloud_with_colors"  # random IKEA plate with hand-drawn shapes
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
 experiment_index = 2  # choose which initial position to use from x0_arr_10.npz
@@ -247,7 +266,7 @@ param.alpha = 100
 param.method = "exact"
 
 # voxel filter size for downsampling the point cloud
-param.voxel_size = 0.003
+param.voxel_size = 0.002
 # radius for the agent footprint that'd be used in coverage
 param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
@@ -273,7 +292,13 @@ param.nb_boundary_neighbors = 40
 # ==========================================
 filename = f"{point_cloud_dir}{obj_name}.ply"
 pcloud = process_point_cloud(filename, param)
+pcd_helper = Pointcloud(pcloud.vertices)
+boundary_normals = pcd_helper.get_boundary_normals()
 
+u0 = np.zeros(len(pcloud.vertices))
+u0[pcd_helper.is_boundary_arr] = 1
+
+scalar_diffusion_solver = PointcloudScalarDiffusion(pcloud=pcd_helper)
 
 pcloud.C, pcloud.M = robust_laplacian.point_cloud_laplacian(
     pcloud.vertices, n_neighbors=param.nb_boundary_neighbors
@@ -382,7 +407,7 @@ agent = SecondOrderAgent(
 )
 
 random_vertex = np.random.randint(0,len(pcloud.vertices))
-agent.x = pcloud.vertices[1000]
+agent.x = pcloud.vertices[2000]
 agent.radius = param.agent_radius
 
 
@@ -397,7 +422,7 @@ plots = visualize_point_cloud(
 )
 fig = visualize_trajectory(x_arr[:,:], plots, color="black")
 
-fig.show()
+fig.show('browser')
 
 import plotly.io as pio
 

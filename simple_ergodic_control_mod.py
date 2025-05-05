@@ -199,14 +199,14 @@ def hedac(agent, param, pcloud):
 
             goal_density = (normalize_mat(observed_pred.mean.cpu().numpy()) + normalize_mat(var_tmp)) /2
 
-            # plots = visualize_point_cloud(
-            #     pcloud.vertices, 
-            #     colors=goal_density, 
-            #     # colors=heat_arr[...,-1], 
-            #     is_show_plot=False, point_size=5
-            # )
-            # fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
-            # fig.show()
+            plots = visualize_point_cloud(
+                pcloud.vertices, 
+                colors=goal_density, 
+                # colors=heat_arr[...,-1], 
+                is_show_plot=False, point_size=5
+            )
+            fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
+            fig.show()
 
             # plots = visualize_point_cloud(
             #     pcloud.vertices, 
@@ -415,10 +415,10 @@ plots = visualize_point_cloud(
 )
 fig = visualize_trajectory(x_arr[:,:], plots, color="black")
 
-fig.show()
+fig.show('browser')
 
 import plotly.io as pio
 
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=goal_arr, timesteps=param.timesteps, save_path="cup_X_reconstructed_dist3.html")
+# animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=goal_arr, timesteps=param.timesteps, save_path="cup_X_reconstructed_dist3.html")
 
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=heat_arr, timesteps=param.timesteps, save_path="cup_X_heat3.html")
+# animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=heat_arr, timesteps=param.timesteps, save_path="cup_X_heat3.html")
