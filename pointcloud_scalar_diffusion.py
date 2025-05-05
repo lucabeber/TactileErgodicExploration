@@ -372,8 +372,11 @@ class PointcloudScalarDiffusion(DiffusionSolver):
         self.gradient_ut = self.grad @ ut
 
         self.gradient_ut_3d = self.project_from_pcloud_to_3d(self.gradient_ut)
+        # self.gradient_ut_3d = (
+        #     self.gradient_ut_3d / np.linalg.norm(self.gradient_ut_3d, axis=1)[:, None]
+        # )
         if hasattr(self.pcloud, "boundary_normals"):
-            self.gradient_ut_3d[self.pcloud.is_boundary_arr, :] = (
+            self.gradient_ut_3d[self.pcloud.is_boundary_arr, :] = 1.0 * (
                 self.pcloud.boundary_normals
             )
 

@@ -138,12 +138,9 @@ def hedac(agent, param, pcloud):
         time_arr[t] = time.time() - start_time
 
         ut += param.source_strength * source
+        ut[pcd_helper.is_boundary_arr] = 0
         scalar_diffusion_solver.get_gradient(ut)
-        (
-            agent.x,
-            gradient,
-            projected_neighbor_coords,
-        ) = get_gradient(
+        (agent.x,) = get_gradient(
             np.copy(agent.x),
             neighbor_coords,
             neighbor_ids,
@@ -154,18 +151,6 @@ def hedac(agent, param, pcloud):
             scalar_diffusion_solver.gradient_ut_3d[neighbor_ids[:10]], axis=0
         )
 
-        # agent.update(gradient)
-
-        # (
-        #     agent.x,
-        #     gradient,
-        #     _,
-        # ) = get_gradient(
-        #     np.copy(agent.x),
-        #     neighbor_coords,
-        #     neighbor_ids,
-        #     ut,
-        # )
         agent.update(gradient)
 
         coverage_arr[..., t] = coverage
@@ -218,6 +203,7 @@ def hedac(agent, param, pcloud):
             # o3d.visualization.draw_geometries([pcd], window_name="Target density")
 
             var_tmp = observed_pred.variance.cpu().numpy()
+            mean_tmp = observed_pred.mean.cpu().numpy()
 
             # Set variance to zero along the borders of the point cloud
             border_indices = get_border_indices(
@@ -225,9 +211,14 @@ def hedac(agent, param, pcloud):
             )
 
             goal_density = (
-                normalize_mat(observed_pred.mean.cpu().numpy()) + normalize_mat(var_tmp)
-            ) / 2
-            goal_density[border_indices] = 0
+                normalize_mat(
+                    param.exploit_alpha * normalize_mat(mean_tmp)
+                    + (1 - param.exploit_alpha) * normalize_mat(var_tmp)
+                )
+                / 2
+            )
+
+            # goal_density[border_indices] = 0
             # plots = visualize_point_cloud(
             #     pcloud.vertices,
             #     colors=goal_density,
@@ -268,6 +259,7 @@ class param:
 
 
 param.timesteps = 1500  # total simulation timesteps
+param.exploit_alpha = 0.2
 
 # tuning: [1,100] increasing alpha result in global exploration closer to SS
 # decreasing alpha result in local exploration lower limited
@@ -281,7 +273,7 @@ param.voxel_size = 0.002
 param.agent_radius = 2.5 * param.voxel_size  # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
-param.max_velocity = 0.1 * param.voxel_size
+param.max_velocity = 0.5 * param.voxel_size
 param.max_acceleration = 1.0 * param.max_velocity
 
 # tuning: doesn't have much effect on exploration so we keep it at 1
@@ -410,7 +402,7 @@ fig = go.Figure(plot)
 update_figure(fig)
 fig.update_layout(scene_camera=camera)
 
-fig.show("browser")
+# fig.show("browser")
 
 agent = SecondOrderAgent(
     x=np.zeros(3),
@@ -419,14 +411,20 @@ agent = SecondOrderAgent(
     max_acceleration=param.max_acceleration * 2,
 )
 
+# agent = FirstOrderAgent(
+#     x=np.zeros(3),
+#     dim_t=param.timesteps,
+#     max_velocity=param.max_velocity,
+# )
+
 random_vertex = np.random.randint(0, len(pcloud.vertices))
-agent.x = pcloud.vertices[322]
+# agent.x = pcloud.vertices[810]
+agent.x = pcloud.vertices[random_vertex]
 agent.radius = param.agent_radius
 
 plots = visualize_gradient_field(
     pcloud.vertices[pcd_helper.is_boundary_arr],
     boundary_normals,
-    is_show_plot=True,
     sizeref=10,
 )
 fig = go.Figure(plots)
@@ -446,20 +444,20 @@ fig = visualize_trajectory(x_arr[:, :], plots, color="black")
 
 fig.show("browser")
 
-import plotly.io as pio
+# import plotly.io as pio
 
-animate_trajectory_pcloud(
-    x_arr,
-    vertices=pcloud.vertices,
-    color_frames=goal_arr,
-    timesteps=param.timesteps,
-    save_path="pl_3dk_target_distribution.html",
-)
+# animate_trajectory_pcloud(
+#     x_arr,
+#     vertices=pcloud.vertices,
+#     color_frames=goal_arr,
+#     timesteps=param.timesteps,
+#     save_path="pl_3dk_target_distribution.html",
+# )
 
-animate_trajectory_pcloud(
-    x_arr,
-    vertices=pcloud.vertices,
-    color_frames=heat_arr,
-    timesteps=param.timesteps,
-    save_path="pl_3dk_goal_density.html",
-)
+# animate_trajectory_pcloud(
+#     x_arr,
+#     vertices=pcloud.vertices,
+#     color_frames=heat_arr,
+#     timesteps=param.timesteps,
+#     save_path="pl_3dk_goal_density.html",
+# )

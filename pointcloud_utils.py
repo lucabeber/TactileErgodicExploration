@@ -1,27 +1,27 @@
 """
-    Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
-    Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
+Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
+Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
 
-    This file is part of tactileErgodicExploration.
+This file is part of tactileErgodicExploration.
 
-    tactileErgodicExploration is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License version 3 as
-    published by the Free Software Foundation.
+tactileErgodicExploration is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License version 3 as
+published by the Free Software Foundation.
 
-    tactileErgodicExploration is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-    GNU General Public License for more details.
+tactileErgodicExploration is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with tactileErgodicExploration. If not, see <http://www.gnu.org/licenses/>.
+You should have received a copy of the GNU General Public License
+along with tactileErgodicExploration. If not, see <http://www.gnu.org/licenses/>.
 """
 
 import numpy as np
-
+import open3d as o3d
 from scipy.spatial import KDTree
 from sklearn.preprocessing import PolynomialFeatures
-import open3d as o3d
+
 
 def compute_coverage_residual(initial_heat_arr, coverage_arr):
     """
@@ -46,6 +46,8 @@ def compute_coverage_residual(initial_heat_arr, coverage_arr):
     )
 
     return normalized_residual
+
+
 def normalize_mat(mat):
     """
     Normalize a matrix by dividing each element by the sum of all elements in the
@@ -81,7 +83,7 @@ def process_point_cloud(filename, param):
     )
     # set the exploration target using the 'red' channel of the point cloud
     u0 = colors[:, 0]
-    pcloud.u0 = u0 #np.where(u0 < 1, 0, 255)
+    pcloud.u0 = u0  # np.where(u0 < 1, 0, 255)
     # compute the K-D tree for the nearest neighbor queries later
     pcloud.pcd_tree = o3d.geometry.KDTreeFlann(pcd)
 
@@ -421,33 +423,7 @@ def get_gradient(
         tangent_vector_2,
     )
 
-    values = np.zeros_like(neighbor_ids, dtype=float)
-
-    for i in range(len(neighbor_ids)):
-        values[i] = ut[neighbor_ids[i]]
-
-    # consider the temperature values on the tangent
-    # space as heights and fit a 3rd degree polynomial
-    coeffs, X = fit_poly_surface(uv_coords, values)
-    # get gradient in the tangent space (uv-coords)
-    grad_uv = get_gradient_3rd_degree_polynomial(uv_coords, coeffs, return_neighbors)
-
-    # project gradient back to 3-D
-    if return_neighbors:  # if speed is an issue don't consider neighbors
-        grad_3d = (
-            grad_uv[:, 0][:, None] * tangent_vector_1
-            + grad_uv[:, 1][:, None] * tangent_vector_2
-        )
-        unit_grad = grad_3d / np.linalg.norm(grad_3d, axis=1)[:, None]
-    else:
-        grad_3d = grad_uv[0] * tangent_vector_1 + grad_uv[1] * tangent_vector_2
-        unit_grad = grad_3d / np.linalg.norm(grad_3d)
-
-    return (
-        projected_agent_positon,
-        unit_grad,
-        projected_neighbor_coords,
-    )
+    return (projected_agent_positon,)
 
 
 def get_pcloud_neighbors(
