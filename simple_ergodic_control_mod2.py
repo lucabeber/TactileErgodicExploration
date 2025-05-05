@@ -1,20 +1,20 @@
 """
-    Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
-    Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
+Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
+Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
 
-    This file is part of tactileErgodicExploration.
+This file is part of tactileErgodicExploration.
 
-    tactileErgodicExploration is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License version 3 as
-    published by the Free Software Foundation.
+tactileErgodicExploration is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License version 3 as
+published by the Free Software Foundation.
 
-    tactileErgodicExploration is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-    GNU General Public License for more details.
+tactileErgodicExploration is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
 
-    You should have received a copy of the GNU General Public License
-    along with tactileErgodicExploration. If not, see <http://www.gnu.org/licenses/>.
+You should have received a copy of the GNU General Public License
+along with tactileErgodicExploration. If not, see <http://www.gnu.org/licenses/>.
 """
 
 import numpy as np
@@ -22,11 +22,12 @@ import numpy as np
 np.set_printoptions(formatter={"float": lambda x: "{0:0.3e}".format(x)})
 
 import time
+
 import torch
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device: ", device)
 torch.set_default_device(device)
-
 
 
 import robust_laplacian
@@ -40,13 +41,14 @@ from pointcloud_scalar_diffusion import PointcloudScalarDiffusion
 from pointcloud_utils import *
 from virtual_agents import FirstOrderAgent, SecondOrderAgent
 
+
 def hedac(agent, param, pcloud):
     """
     Perform HEDAC exploration using the agent and the point cloud.
 
     Original implementation on a 2-D rectangular grid by Ivic et al.
-    Ivić, S., Crnković, B., & Mezić, I. (2017). Ergodicity-Based Cooperative 
-    Multiagent Area Coverage via a Potential Field. IEEE Transactions on 
+    Ivić, S., Crnković, B., & Mezić, I. (2017). Ergodicity-Based Cooperative
+    Multiagent Area Coverage via a Potential Field. IEEE Transactions on
     Cybernetics, 47(8), 1983–1993. https://doi.org/10.1109/TCYB.2016.2634400
 
     Args:
@@ -62,7 +64,7 @@ def hedac(agent, param, pcloud):
     coverage_arr = np.zeros((len(pcloud.vertices), param.timesteps))
     heat_arr = np.zeros_like(coverage_arr)
     goal_density_arr = np.zeros_like(coverage_arr)
-    
+
     # Initialize goal density
     sample_points = torch.tensor(agent.x, dtype=torch.float32).reshape(1, -1)
     # Make prediction
@@ -85,7 +87,6 @@ def hedac(agent, param, pcloud):
     model.train()
     likelihood.train()
 
-
     # Get into evaluation (predictive posterior) mode and predict
     model.eval()
     likelihood.eval()
@@ -98,14 +99,13 @@ def hedac(agent, param, pcloud):
     goal_density = observed_pred.mean.cpu().numpy()
 
     # we normalize the goal because it should be a probability distribution
-    goal_density = normalize_mat(goal_density) 
+    goal_density = normalize_mat(goal_density)
     ut = np.array(goal_density)
 
     # we keep this and add coverage at each timestep on top of it
     coverage = np.zeros_like(goal_density)
-    
 
-    fig.show('browser')
+    fig.show("browser")
     # for keeping the runtime of each timestep
     time_arr = np.zeros(param.timesteps)
 
@@ -176,12 +176,14 @@ def hedac(agent, param, pcloud):
             print(f"Time step: {t}/{param.timesteps}")
             # Update the goal density
             # Extract the trajectory
-            sample_points = torch.tensor(agent.x_arr[:t:10, :] , dtype=torch.float32, device=device)
+            sample_points = torch.tensor(
+                agent.x_arr[:t:10, :], dtype=torch.float32, device=device
+            )
             print(sample_points.shape)
             # Make prediction
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 gpr_original_density = likelihood_real(model_real(sample_points))
-            
+
             density_sample = gpr_original_density.mean
 
             # Construct training data
@@ -202,7 +204,7 @@ def hedac(agent, param, pcloud):
 
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 observed_pred = likelihood(model(test_x))
-            
+
             # # Map stiffness to RGB colors using a colormap
             # colormap = cm.get_cmap('jet')  # Change to 'jet' or other colormaps if needed
             # colors = colormap(observed_pred.mean.cpu().numpy())[:, :3]  # Convert to RGB
@@ -218,23 +220,27 @@ def hedac(agent, param, pcloud):
             var_tmp = observed_pred.variance.cpu().numpy()
 
             # Set variance to zero along the borders of the point cloud
-            border_indices = get_border_indices(pcloud.vertices, param.nb_boundary_neighbors)
+            border_indices = get_border_indices(
+                pcloud.vertices, param.nb_boundary_neighbors
+            )
 
-            goal_density = (normalize_mat(observed_pred.mean.cpu().numpy()) + normalize_mat(var_tmp)) /2
+            goal_density = (
+                normalize_mat(observed_pred.mean.cpu().numpy()) + normalize_mat(var_tmp)
+            ) / 2
             goal_density[border_indices] = 0
             # plots = visualize_point_cloud(
-            #     pcloud.vertices, 
-            #     colors=goal_density, 
-            #     # colors=heat_arr[...,-1], 
+            #     pcloud.vertices,
+            #     colors=goal_density,
+            #     # colors=heat_arr[...,-1],
             #     is_show_plot=False, point_size=5
             # )
             # fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
             # fig.show()
 
             # plots = visualize_point_cloud(
-            #     pcloud.vertices, 
-            #     colors=heat_arr[...,t], 
-            #     # colors=heat_arr[...,-1], 
+            #     pcloud.vertices,
+            #     colors=heat_arr[...,t],
+            #     # colors=heat_arr[...,-1],
             #     is_show_plot=False, point_size=5
             # )
             # fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
@@ -243,15 +249,19 @@ def hedac(agent, param, pcloud):
 
     return agent.x_arr, heat_arr, coverage_arr, time_arr, goal_density_arr
 
+
 point_cloud_dir = "point_clouds/"
 
 # Select the object to explore
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
-obj_name = "processed_pointcloud_with_colors"  # random IKEA plate with hand-drawn shapes
+obj_name = (
+    "processed_pointcloud_with_colors"  # random IKEA plate with hand-drawn shapes
+)
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
 experiment_index = 2  # choose which initial position to use from x0_arr_10.npz
+
 
 class param:
     pass  # c-style struct
@@ -268,7 +278,7 @@ param.method = "exact"
 # voxel filter size for downsampling the point cloud
 param.voxel_size = 0.002
 # radius for the agent footprint that'd be used in coverage
-param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
+param.agent_radius = 2.5 * param.voxel_size  # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
 param.max_velocity = 0.1 * param.voxel_size
@@ -308,14 +318,17 @@ A = csc_matrix(pcloud.M + pcloud.dt * pcloud.C)  # Ensure sparse format
 pcloud.A_factorized = splu(A)  # LU factorization
 
 
+import os
+
+import gpytorch
+import matplotlib.cm as cm
+import matplotlib.pyplot as plt
+import open3d as o3d
+
 # Define the goal density
 # ========================
 import torch
-import gpytorch
-import matplotlib.pyplot as plt
-import open3d as o3d
-import os
-import matplotlib.cm as cm
+
 
 def get_border_indices(vertices, nb_boundary_neighbors):
     """
@@ -350,8 +363,8 @@ def get_border_indices(vertices, nb_boundary_neighbors):
     # pcd.colors = o3d.utility.Vector3dVector(colors)
     # o3d.visualization.draw_geometries([pcd], window_name="Border vertices")
 
-
     return border_indices
+
 
 # Load gp on pc class
 # ====================
@@ -378,6 +391,7 @@ model_real.eval()
 likelihood_real.eval()
 
 import time
+
 start = time.time()
 with torch.no_grad():
     observed_pred = likelihood_real(model_real(train_x))
@@ -388,44 +402,64 @@ mean = observed_pred.mean.cpu().numpy()
 
 
 camera = dict(
-    up=dict(x=0, y=1, z=0),
-    center=dict(x=0, y=0, z=0),
-    eye=dict(x=0, y=0.7, z=1.25)
+    up=dict(x=0, y=1, z=0), center=dict(x=0, y=0, z=0), eye=dict(x=0, y=0.7, z=1.25)
 )
 
 plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean)
 fig = go.Figure(plot)
 update_figure(fig)
-fig.update_layout(
-    scene_camera=camera
-)
+fig.update_layout(scene_camera=camera)
 
-fig.show('browser')
+fig.show("browser")
 
 agent = SecondOrderAgent(
-    x=np.zeros(3), dim_t=param.timesteps, max_velocity=param.max_velocity,max_acceleration=param.max_acceleration*2
+    x=np.zeros(3),
+    dim_t=param.timesteps,
+    max_velocity=param.max_velocity,
+    max_acceleration=param.max_acceleration * 2,
 )
 
-random_vertex = np.random.randint(0,len(pcloud.vertices))
-agent.x = pcloud.vertices[2000]
+random_vertex = np.random.randint(0, len(pcloud.vertices))
+agent.x = pcloud.vertices[322]
 agent.radius = param.agent_radius
 
+plots = visualize_gradient_field(
+    pcloud.vertices[pcd_helper.is_boundary_arr],
+    boundary_normals,
+    is_show_plot=True,
+    sizeref=10,
+)
+fig = go.Figure(plots)
+fig.show("browser")
 
 x_arr, heat_arr, coverage_arr, time_arr, goal_arr = hedac(agent, param, pcloud)
 
 
 plots = visualize_point_cloud(
-    pcloud.vertices, 
-    colors=heat_arr[...,0], 
-    # colors=heat_arr[...,-1], 
-    is_show_plot=False, point_size=5
+    pcloud.vertices,
+    colors=heat_arr[..., 0],
+    # colors=heat_arr[...,-1],
+    is_show_plot=False,
+    point_size=5,
 )
-fig = visualize_trajectory(x_arr[:,:], plots, color="black")
+fig = visualize_trajectory(x_arr[:, :], plots, color="black")
 
-fig.show('browser')
+fig.show("browser")
 
 import plotly.io as pio
 
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=goal_arr, timesteps=param.timesteps, save_path="pl_3dk_target_distribution.html")
+animate_trajectory_pcloud(
+    x_arr,
+    vertices=pcloud.vertices,
+    color_frames=goal_arr,
+    timesteps=param.timesteps,
+    save_path="pl_3dk_target_distribution.html",
+)
 
-animate_trajectory_pcloud(x_arr, vertices=pcloud.vertices, color_frames=heat_arr, timesteps=param.timesteps, save_path="pl_3dk_goal_density.html")
+animate_trajectory_pcloud(
+    x_arr,
+    vertices=pcloud.vertices,
+    color_frames=heat_arr,
+    timesteps=param.timesteps,
+    save_path="pl_3dk_goal_density.html",
+)
