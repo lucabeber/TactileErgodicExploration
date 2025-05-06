@@ -268,7 +268,7 @@ param.alpha = 100
 param.method = "exact"
 
 # voxel filter size for downsampling the point cloud
-param.voxel_size = 0.002
+param.voxel_size = 0.003
 # radius for the agent footprint that'd be used in coverage
 param.agent_radius = 2.5 * param.voxel_size  # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
@@ -378,7 +378,6 @@ model_real.train()
 likelihood_real.train()
 
 
-# Get into evaluation (predictive posterior) mode and predict
 model_real.eval()
 likelihood_real.eval()
 
