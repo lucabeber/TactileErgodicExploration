@@ -148,7 +148,7 @@ def visualize_point_cloud(
     color_arr = np.asarray(pcd.colors)
 
     marker = dict(
-        size=point_size,
+        size=point_size,    
         showscale=True,
         opacity=0.8,
     )
@@ -320,7 +320,7 @@ def animate_trajectory_pcloud(
     )
 
     # Animation Frames (Update Trajectory + Colors)
-    timestep_multiplier = 10
+    timestep_multiplier = 100
     n_frames = timesteps // timestep_multiplier
 
     # Precompute unit circle in x-y plane
