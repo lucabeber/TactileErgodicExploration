@@ -160,7 +160,7 @@ def hedac(agent, param, pcloud):
         goal_density_arr[..., t] = goal_density
         estimated_density_arr[..., t] = mean_tmp
 
-        if t % 50 == 0 and t > 0:
+        if t % 100 == 0 and t > 0:
             print(f"Time step: {t}/{param.timesteps}")
             # Update the goal density
             # Extract the trajectory
@@ -207,14 +207,14 @@ def hedac(agent, param, pcloud):
 
             var_tmp = normalize_mat(observed_pred.variance.cpu().numpy())
             mean_tmp = normalize_mat(observed_pred.mean.cpu().numpy())
-
+            
             # Set variance to zero along the borders of the point cloud
             border_indices = get_border_indices(
                 pcloud.vertices, param.nb_boundary_neighbors
             )
 
             goal_density = (
-                    param.exploit_alpha * normalize_mat(mean_tmp)
+                    param.exploit_alpha * normalize_mat(np.maximum(mean_tmp - np.mean(mean_tmp), 0))
                     + (1 - param.exploit_alpha) * normalize_mat(var_tmp)
             )
             goal_density = normalize_mat(goal_density)
@@ -247,7 +247,7 @@ point_cloud_dir = "point_clouds/"
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
 obj_name = (
-    "bun270_X"  # random IKEA plate with hand-drawn shapes
+    ""  # random IKEA plate with hand-drawn shapes
 )
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
@@ -258,8 +258,8 @@ class param:
     pass  # c-style struct
 
 
-param.timesteps = 6000  # total simulation timesteps
-param.exploit_alpha = 0.5  # alpha for the exploitation term in the goal density
+param.timesteps = 7000  # total simulation timesteps
+param.exploit_alpha = 0.4  # alpha for the exploitation term in the goal density
 
 # tuning: [1,100] increasing alpha result in global exploration closer to SS
 # decreasing alpha result in local exploration lower limited
@@ -273,8 +273,8 @@ param.voxel_size = 0.002
 param.agent_radius = 2 * param.voxel_size  # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
-param.max_velocity = 0.025
-param.max_acceleration = 0.025
+param.max_velocity = 0.050
+param.max_acceleration = 0.1
 # define the time step size
 
 # tuning: doesn't have much effect on exploration so we keep it at 1
@@ -363,7 +363,7 @@ def get_border_indices(vertices, nb_boundary_neighbors):
 # ====================
 l = param.agent_radius
 sigma = 1.0
-n_eig = 300
+n_eig = 500
 km = rbf_manifold_kernel(pcloud.vertices, l, sigma, n_eig)
 
 # Construct training data
@@ -462,3 +462,15 @@ fig.show("browser")
 #     timesteps=param.timesteps,
 #     save_path="pl_3dk_goal_density.html",
 # )
+
+# --- Example usage ---
+# Choose 5 steps to visualise
+steps_to_plot = [0, 100, 500, 1000, 2000]
+
+plot_distribution_evolution_column_auto(
+    vertices=pcloud.vertices,
+    original_density=mean,
+    estimated_density_arr=estimated_density_arr,
+    pdf_name="distribution_evolution5_bunny.pdf",
+    agent_trajectory=x_arr[:, :],
+)

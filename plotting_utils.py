@@ -426,3 +426,82 @@ def animate_trajectory_pcloud(
         fig.write_html(save_path)
 
     fig.show()
+
+
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
+
+def plot_distribution_evolution_column_auto(vertices,
+                                            original_density,
+                                            estimated_density_arr,
+                                            pdf_name="distribution_evolution_column.pdf",
+                                            agent_trajectory=None):
+    """
+    Creates a 1-column × 6-row figure.
+    Row 1 = original distribution
+    Rows 2–6 = estimated distributions automatically chosen at 5 evenly-spaced steps.
+    No labels, no titles, no ticks, no grid.
+    """
+
+    num_steps = estimated_density_arr.shape[1]
+
+    # Automatically pick 5 evenly spaced steps (excluding the last one for safety)
+    steps = np.linspace(0, num_steps - 1, 6, dtype=int)[1:]  # skip the first (original)
+
+    # Height = 4 cm
+    height_in = 4 / 2.54
+
+    fig, axes = plt.subplots(
+        nrows=1, ncols=6,
+        # figsize=(3, height_in),  # 3 inch width can be adjusted
+        constrained_layout=True
+    )
+
+    # Remove grid, ticks, labels, titles
+    for ax in axes:
+        ax.grid(False)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_aspect("equal")
+        ax.set_xlabel("")
+        ax.set_ylabel("")
+        ax.set_title("")
+        # Remove axes frame/box and make axes backgrounds transparent
+        fig.patch.set_alpha(0)
+        for ax in axes:
+            ax.set_frame_on(False)
+            ax.patch.set_alpha(0)
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+    # Column 1: original distribution
+    axes[0].scatter(vertices[:, 0], vertices[:, 1],
+                    c=original_density, s=1.5, cmap="viridis")
+
+    # Columns 2–6: estimated distributions
+    for i, step in enumerate(steps):
+        axes[i + 1].scatter(
+            vertices[:, 0],
+            vertices[:, 1],
+            c=estimated_density_arr[:, step],
+            s=1.5,  # decreased point size
+            cmap="viridis",
+            # linewidths=0,
+            # alpha=1.5,
+        )
+
+        # Overlay the agent trajectory in black (if provided)
+        if agent_trajectory is not None:
+            traj = np.asarray(agent_trajectory)
+            if traj.ndim == 2 and traj.shape[1] >= 2:
+                axes[i + 1].plot(traj[:step, 0], traj[:step, 1], color="r", linewidth=0.8, zorder=10,alpha=0.6)
+            elif traj.ndim == 1 and traj.size >= 2:
+                axes[i + 1].plot(traj[0], traj[1], marker="o", color="r", zorder=10)
+
+    # Save to PDF
+    with PdfPages(pdf_name) as pdf:
+        pdf.savefig(fig, bbox_inches="tight", pad_inches=0, dpi=600, transparent=True)
+
+    plt.close(fig)
+    print(f"Saved '{pdf_name}' with steps: {steps.tolist()}")
+
+
