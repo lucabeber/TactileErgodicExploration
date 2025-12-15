@@ -160,12 +160,12 @@ def hedac(agent, param, pcloud):
         goal_density_arr[..., t] = goal_density
         estimated_density_arr[..., t] = mean_tmp
 
-        if t % 100 == 0 and t > 0:
+        if t % 50 == 0 and t > 0:
             print(f"Time step: {t}/{param.timesteps}")
             # Update the goal density
             # Extract the trajectory
             sample_points = torch.tensor(
-                agent.x_arr[:t:25, :], dtype=torch.float32, device=device
+                agent.x_arr[:t:5, :], dtype=torch.float32, device=device
             )
             print(sample_points.shape)
             # Make prediction
@@ -247,7 +247,7 @@ point_cloud_dir = "point_clouds/"
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
 obj_name = (
-    ""  # random IKEA plate with hand-drawn shapes
+    "plate_shapes"  # random IKEA plate with hand-drawn shapes
 )
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
@@ -258,8 +258,9 @@ class param:
     pass  # c-style struct
 
 
-param.timesteps = 7000  # total simulation timesteps
-param.exploit_alpha = 0.4  # alpha for the exploitation term in the goal density
+param.exploit_alpha = 0.5  # total simulation timesteps
+
+param.timesteps = 3500  # total simulation timesteps
 
 # tuning: [1,100] increasing alpha result in global exploration closer to SS
 # decreasing alpha result in local exploration lower limited
@@ -268,14 +269,13 @@ param.alpha = 100
 param.method = "exact"
 
 # voxel filter size for downsampling the point cloud
-param.voxel_size = 0.002
+param.voxel_size = 0.003
 # radius for the agent footprint that'd be used in coverage
-param.agent_radius = 2 * param.voxel_size  # for the cup and the bunny
+param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
-param.max_velocity = 0.050
-param.max_acceleration = 0.1
-# define the time step size
+param.max_velocity = 0.1 * param.voxel_size
+param.max_acceleration = 1.0 * param.max_velocity
 
 # tuning: doesn't have much effect on exploration so we keep it at 1
 param.source_strength = 1
@@ -409,7 +409,6 @@ agent = SecondOrderAgent(
     max_velocity=param.max_velocity,
     max_acceleration=param.max_acceleration * 2,
     dim_t=param.timesteps,
-    dt=0.01,
 )
 
 # agent = FirstOrderAgent(
@@ -420,7 +419,7 @@ agent = SecondOrderAgent(
 
 random_vertex = np.random.randint(0, len(pcloud.vertices))
 # agent.x = pcloud.vertices[810]
-agent.x = pcloud.vertices[1500]
+agent.x = pcloud.vertices[1000]
 agent.radius = param.agent_radius
 
 # plots = visualize_gradient_field(
