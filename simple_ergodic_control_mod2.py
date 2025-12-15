@@ -247,7 +247,7 @@ point_cloud_dir = "point_clouds/"
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
 obj_name = (
-    "plate_shapes"  # random IKEA plate with hand-drawn shapes
+    "cup_X"  # random IKEA plate with hand-drawn shapes
 )
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
@@ -258,9 +258,9 @@ class param:
     pass  # c-style struct
 
 
-param.exploit_alpha = 0.5  # total simulation timesteps
+param.exploit_alpha = 0.6  # total simulation timesteps
 
-param.timesteps = 3500  # total simulation timesteps
+param.timesteps = 5000  # total simulation timesteps
 
 # tuning: [1,100] increasing alpha result in global exploration closer to SS
 # decreasing alpha result in local exploration lower limited
@@ -269,12 +269,12 @@ param.alpha = 100
 param.method = "exact"
 
 # voxel filter size for downsampling the point cloud
-param.voxel_size = 0.003
+param.voxel_size = 0.002
 # radius for the agent footprint that'd be used in coverage
 param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
-param.max_velocity = 0.1 * param.voxel_size
+param.max_velocity = 0.1 * param.voxel_size 
 param.max_acceleration = 1.0 * param.max_velocity
 
 # tuning: doesn't have much effect on exploration so we keep it at 1
@@ -361,9 +361,9 @@ def get_border_indices(vertices, nb_boundary_neighbors):
 
 # Load gp on pc class
 # ====================
-l = param.agent_radius
+l = 0.002
 sigma = 1.0
-n_eig = 500
+n_eig = 200
 km = rbf_manifold_kernel(pcloud.vertices, l, sigma, n_eig)
 
 # Construct training data
