@@ -475,7 +475,7 @@ def plot_distribution_evolution_column_auto(vertices,
                 spine.set_visible(False)
     # Column 1: original distribution
     axes[0].scatter(vertices[:, 0], vertices[:, 1],
-                    c=original_density, s=1.5, cmap="viridis")
+                    c=original_density, s=1.5, cmap="viridis",rasterized=True)
 
     # Columns 2–6: estimated distributions
     for i, step in enumerate(steps):
@@ -487,6 +487,7 @@ def plot_distribution_evolution_column_auto(vertices,
             cmap="viridis",
             # linewidths=0,
             # alpha=1.5,
+            rasterized=True
         )
 
         # Overlay the agent trajectory in black (if provided)

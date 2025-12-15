@@ -247,7 +247,7 @@ point_cloud_dir = "point_clouds/"
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
 obj_name = (
-    "cup_X"  # random IKEA plate with hand-drawn shapes
+    "plate_shapes"  # random IKEA plate with hand-drawn shapes
 )
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
@@ -260,7 +260,7 @@ class param:
 
 param.exploit_alpha = 0.6  # total simulation timesteps
 
-param.timesteps = 5000  # total simulation timesteps
+param.timesteps = 7500  # total simulation timesteps
 
 # tuning: [1,100] increasing alpha result in global exploration closer to SS
 # decreasing alpha result in local exploration lower limited
@@ -274,8 +274,8 @@ param.voxel_size = 0.002
 param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
-param.max_velocity = 0.1 * param.voxel_size 
-param.max_acceleration = 1.0 * param.max_velocity
+param.max_velocity = 0.1 * param.voxel_size * 2
+param.max_acceleration = 1.0 * param.max_velocity * 2
 
 # tuning: doesn't have much effect on exploration so we keep it at 1
 param.source_strength = 1
@@ -361,9 +361,9 @@ def get_border_indices(vertices, nb_boundary_neighbors):
 
 # Load gp on pc class
 # ====================
-l = 0.002
+l = 0.010
 sigma = 1.0
-n_eig = 200
+n_eig = 500
 km = rbf_manifold_kernel(pcloud.vertices, l, sigma, n_eig)
 
 # Construct training data
@@ -419,7 +419,7 @@ agent = SecondOrderAgent(
 
 random_vertex = np.random.randint(0, len(pcloud.vertices))
 # agent.x = pcloud.vertices[810]
-agent.x = pcloud.vertices[1000]
+agent.x = pcloud.vertices[1500]
 agent.radius = param.agent_radius
 
 # plots = visualize_gradient_field(
@@ -470,6 +470,6 @@ plot_distribution_evolution_column_auto(
     vertices=pcloud.vertices,
     original_density=mean,
     estimated_density_arr=estimated_density_arr,
-    pdf_name="distribution_evolution5_bunny.pdf",
+    pdf_name="distribution_evolution6_" + obj_name + ".pdf",
     agent_trajectory=x_arr[:, :],
 )
