@@ -448,12 +448,8 @@ def plot_distribution_evolution_column_auto(vertices,
     # Automatically pick 5 evenly spaced steps (excluding the last one for safety)
     steps = np.linspace(0, num_steps - 1, 6, dtype=int)[1:]  # skip the first (original)
 
-    # Height = 4 cm
-    height_in = 4 / 2.54
-
     fig, axes = plt.subplots(
         nrows=1, ncols=6,
-        # figsize=(3, height_in),  # 3 inch width can be adjusted
         constrained_layout=True
     )
 
@@ -485,8 +481,6 @@ def plot_distribution_evolution_column_auto(vertices,
             c=estimated_density_arr[:, step],
             s=1.5,  # decreased point size
             cmap="viridis",
-            # linewidths=0,
-            # alpha=1.5,
             rasterized=True
         )
 
@@ -494,7 +488,12 @@ def plot_distribution_evolution_column_auto(vertices,
         if agent_trajectory is not None:
             traj = np.asarray(agent_trajectory)
             if traj.ndim == 2 and traj.shape[1] >= 2:
-                axes[i + 1].plot(traj[:step, 0], traj[:step, 1], color="r", linewidth=0.8, zorder=10,alpha=0.6)
+                axes[i + 1].plot(traj[:step, 0], traj[:step, 1], color="r", linewidth=0.8, zorder=10, alpha=0.6)
+                # Add orange point at beginning
+                axes[i + 1].plot(traj[0, 0], traj[0, 1], marker="o", color="orange", markersize=1, zorder=11, alpha=1.0)
+                # Add violet point at end
+                if step > 0:
+                    axes[i + 1].plot(traj[step - 1, 0], traj[step - 1, 1], marker="o", color="violet", markersize=1, zorder=11,alpha=1.0)
             elif traj.ndim == 1 and traj.size >= 2:
                 axes[i + 1].plot(traj[0], traj[1], marker="o", color="r", zorder=10)
 

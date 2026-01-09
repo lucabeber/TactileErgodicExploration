@@ -245,10 +245,10 @@ point_cloud_dir = "point_clouds/"
 
 # Select the object to explore
 
-# obj_name = "bun270_X" # Stanford bunny with X projected as the target
-obj_name = (
-    "plate_shapes"  # random IKEA plate with hand-drawn shapes
-)
+obj_name = "bun270_X" # Stanford bunny with X projected as the target
+# obj_name = (
+#     "plate_shapes"  # random IKEA plate with hand-drawn shapes
+# )
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
 experiment_index = 2  # choose which initial position to use from x0_arr_10.npz
@@ -260,7 +260,7 @@ class param:
 
 param.exploit_alpha = 0.6  # total simulation timesteps
 
-param.timesteps = 7500  # total simulation timesteps
+param.timesteps = 1500  # total simulation timesteps
 
 # tuning: [1,100] increasing alpha result in global exploration closer to SS
 # decreasing alpha result in local exploration lower limited
