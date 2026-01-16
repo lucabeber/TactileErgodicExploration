@@ -92,7 +92,7 @@ class RBF_RM(gpytorch.kernels.Kernel):
             if diag:
                 return torch.diag(kernel_matrix)
             end = time.time()
-            print(f"Time taken: {end - start}")
+            # print(f"Time taken: {end - start}")
             return kernel_matrix
 
 class GPROnPointCloud(gpytorch.models.ExactGP):

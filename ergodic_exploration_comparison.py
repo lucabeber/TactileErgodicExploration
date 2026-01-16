@@ -42,7 +42,7 @@ from pointcloud_utils import *
 from virtual_agents import FirstOrderAgent, SecondOrderAgent
 
 
-def hedac(agent, param, pcloud):
+def hedac(agent, param, pcloud, update_interval=50):
     """
     Perform HEDAC exploration using the agent and the point cloud.
 
@@ -102,6 +102,7 @@ def hedac(agent, param, pcloud):
     # we normalize the goal because it should be a probability distribution
     goal_density = normalize_mat(goal_density)
     mean_tmp = normalize_mat(observed_pred.mean.cpu().numpy())
+    mean_not_normalized = observed_pred.mean.cpu().numpy()
     ut = np.array(goal_density)
 
     # we keep this and add coverage at each timestep on top of it
@@ -158,16 +159,16 @@ def hedac(agent, param, pcloud):
         coverage_arr[..., t] = coverage
         heat_arr[..., t] = np.copy(ut)
         goal_density_arr[..., t] = goal_density
-        estimated_density_arr[..., t] = mean_tmp
+        estimated_density_arr[..., t] = mean_not_normalized
 
-        if t % 50 == 0 and t > 0:
-            print(f"Time step: {t}/{param.timesteps}")
+        if t % update_interval == 0 and t > 0:
+            # print(f"Time step: {t}/{param.timesteps}")
             # Update the goal density
             # Extract the trajectory
             sample_points = torch.tensor(
                 agent.x_arr[:t:5, :], dtype=torch.float32, device=device
             )
-            print(sample_points.shape)
+            # print(sample_points.shape)
             # Make prediction
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 gpr_original_density = likelihood_real(model_real(sample_points))
@@ -207,11 +208,9 @@ def hedac(agent, param, pcloud):
 
             var_tmp = normalize_mat(observed_pred.variance.cpu().numpy())
             mean_tmp = normalize_mat(observed_pred.mean.cpu().numpy())
-            
+            mean_not_normalized = observed_pred.mean.cpu().numpy()
             # Set variance to zero along the borders of the point cloud
-            border_indices = get_border_indices(
-                pcloud.vertices, param.nb_boundary_neighbors
-            )
+
 
             goal_density = (
                     param.exploit_alpha * normalize_mat(np.maximum(mean_tmp - np.mean(mean_tmp), 0))
@@ -237,7 +236,6 @@ def hedac(agent, param, pcloud):
             # fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
 
             # fig.show()
-
     return agent.x_arr, heat_arr, coverage_arr, time_arr, goal_density_arr, estimated_density_arr
 
 
@@ -260,7 +258,7 @@ class param:
 
 param.exploit_alpha = 0.6  # total simulation timesteps
 
-param.timesteps = 5000  # total simulation timesteps
+param.timesteps = 6000  # total simulation timesteps
 
 # tuning: [1,100] increasing alpha result in global exploration closer to SS
 # decreasing alpha result in local exploration lower limited
@@ -323,42 +321,6 @@ import open3d as o3d
 import torch
 
 
-def get_border_indices(vertices, nb_boundary_neighbors):
-    """
-    Identify the border indices of the point cloud.
-
-    Args:
-        vertices (np.ndarray): The vertices of the point cloud.
-        nb_boundary_neighbors (int): The number of neighbors to consider for boundary detection.
-
-    Returns:
-        np.ndarray: The indices of the border vertices.
-    """
-    from sklearn.neighbors import NearestNeighbors
-
-    # Find the nearest neighbors
-    nbrs = NearestNeighbors(n_neighbors=nb_boundary_neighbors).fit(vertices)
-    distances, indices = nbrs.kneighbors(vertices)
-
-    # Calculate the mean distance to the neighbors
-    mean_distances = distances.mean(axis=1)
-
-    # Identify the border vertices as those with the highest mean distance to neighbors
-    threshold = np.percentile(mean_distances, 85)  # Adjust this threshold as needed
-    border_indices = np.where(mean_distances > threshold)[0]
-
-    # Show the border vertices in the point cloud
-    # pcd = o3d.geometry.PointCloud()
-    # pcd.points = o3d.utility.Vector3dVector(vertices)
-    # pcd.colors = o3d.utility.Vector3dVector(np.zeros_like(vertices))
-    # colors = np.zeros_like(vertices)
-    # colors[border_indices] = [1, 0, 0]  # Red color for the border vertices
-    # pcd.colors = o3d.utility.Vector3dVector(colors)
-    # o3d.visualization.draw_geometries([pcd], window_name="Border vertices")
-
-    return border_indices
-
-
 # Load gp on pc class
 # ====================
 l = 0.010
@@ -388,8 +350,9 @@ start = time.time()
 with torch.no_grad():
     observed_pred = likelihood_real(model_real(train_x))
 end = time.time()
-print(f"Time to predict: {end - start}")
-mean = observed_pred.mean.cpu().numpy()
+# print(f"Time to predict: {end - start}")
+global mean_original
+mean_original = observed_pred.mean.cpu().numpy()
 # var = observed_pred.variance.cpu().numpy()
 
 
@@ -397,7 +360,7 @@ camera = dict(
     up=dict(x=0, y=1, z=0), center=dict(x=0, y=0, z=0), eye=dict(x=0, y=0.7, z=1.25)
 )
 
-plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean)
+plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean_original)
 fig = go.Figure(plot)
 update_figure(fig)
 fig.update_layout(scene_camera=camera)
@@ -430,8 +393,82 @@ agent.radius = param.agent_radius
 # fig = go.Figure(plots)
 # fig.show("browser")
 
-x_arr, heat_arr, coverage_arr, time_arr, goal_arr, estimated_density_arr = hedac(agent, param, pcloud)
+# Run HEDAC with different update intervals
+update_intervals = [5, 10, 20, 50, 100, 500, 1000, 2000]
+results = {}
 
+results = {ui: {'ergodic_metrics': [], 'rmses': []} for ui in update_intervals}
+
+for update_interval in update_intervals:
+    print(f"\n{'='*50}")
+    print(f"Running HEDAC with update_interval={update_interval}")
+    print(f"{'='*50}")
+
+    for sim in range(50):  # Run 50 simulations for each update interval
+        # Reset agent for each run
+        agent = SecondOrderAgent(
+            x=np.zeros(3),
+            max_velocity=param.max_velocity,
+            max_acceleration=param.max_acceleration * 2,
+            dim_t=param.timesteps,
+        )
+        random_vertex = np.random.randint(0, len(pcloud.vertices))
+        agent.x = pcloud.vertices[random_vertex]
+        agent.radius = param.agent_radius
+
+        x_arr, heat_arr, coverage_arr, time_arr, goal_arr, estimated_density_arr = hedac(
+            agent, param, pcloud, update_interval=update_interval
+        )
+
+        # Compute ergodic metric (coverage-goal density difference)
+        final_coverage = coverage_arr[..., -1]
+        final_coverage_normalized = normalize_mat(final_coverage)
+        ergodic_metric = np.linalg.norm(final_coverage_normalized - normalize_mat(goal_arr[..., -1]))
+
+        # Compute RMSE between estimated and goal distribution
+        rmse = np.sqrt(np.mean((estimated_density_arr[..., -1] - mean_original)**2))
+
+        results[update_interval]['ergodic_metrics'].append(ergodic_metric)
+        results[update_interval]['rmses'].append(rmse)
+
+
+# Save the results in a numpy file
+np.savez_compressed("hedac_comparison_results.npz", results=results)
+
+# Create box plots comparing results across different update intervals
+fig, axes = plt.subplots(1, 2, figsize=(14, 10))
+fig.suptitle('HEDAC Performance Comparison Across Update Intervals', fontsize=16)
+
+# Plot 1: Ergodic Metric Comparison
+ax = axes[0]
+ax.boxplot([results[ui]['ergodic_metrics'] for ui in update_intervals], tick_labels=update_intervals)
+ax.set_xlabel('Update Interval')
+ax.set_ylabel('Ergodic Metric (L2 norm)')
+ax.set_title('Ergodic Metric vs Update Interval')
+ax.grid(axis='y', alpha=0.3)
+
+# Plot 2: RMSE Comparison
+ax = axes[1]
+ax.boxplot([results[ui]['rmses'] for ui in update_intervals], tick_labels=update_intervals)
+ax.set_xlabel('Update Interval')
+ax.set_ylabel('RMSE')
+ax.set_title('RMSE vs Update Interval')
+ax.grid(axis='y', alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('comparison_results_boxplots.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+# Print summary statistics
+print(f"\n{'='*50}")
+print("SUMMARY OF RESULTS")
+print(f"{'='*50}")
+for update_interval in update_intervals:
+    ergodic_metrics = results[update_interval]['ergodic_metrics']
+    rmses = results[update_interval]['rmses']
+    print(f"Update Interval: {update_interval:4d}")
+    print(f"  Ergodic Metric - Mean: {np.mean(ergodic_metrics):.6f}, Std: {np.std(ergodic_metrics):.6f}")
+    print(f"  RMSE           - Mean: {np.mean(rmses):.6f}, Std: {np.std(rmses):.6f}")
 
 plots = visualize_point_cloud(
     pcloud.vertices,
@@ -468,7 +505,7 @@ steps_to_plot = [0, 100, 500, 1000, 2000]
 
 plot_distribution_evolution_column_auto(
     vertices=pcloud.vertices,
-    original_density=mean,
+    original_density=mean_original,
     estimated_density_arr=estimated_density_arr,
     pdf_name="distribution_evolution6_" + obj_name + ".pdf",
     agent_trajectory=x_arr[:, :],
