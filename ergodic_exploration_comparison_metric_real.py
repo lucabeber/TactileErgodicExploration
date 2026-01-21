@@ -1,21 +1,4 @@
-"""
-Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
-Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
 
-This file is part of tactileErgodicExploration.
-
-tactileErgodicExploration is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License version 3 as
-published by the Free Software Foundation.
-
-tactileErgodicExploration is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with tactileErgodicExploration. If not, see <http://www.gnu.org/licenses/>.
-"""
 
 import numpy as np
 
@@ -41,8 +24,24 @@ from pointcloud_scalar_diffusion import PointcloudScalarDiffusion
 from pointcloud_utils import *
 from virtual_agents import FirstOrderAgent, SecondOrderAgent
 
+from scipy.stats import multivariate_normal as mvn
+def multivariate_gaussian(x, y, z=0):
+    mean1 = np.array([0.3, 0.02])
+    cov1 = np.array([[0.0001, 0.0], [0.0, 0.0001]])
+    mean2 = np.array([0.27, 0.08])
+    cov2 = np.array([[0.0001, 0.0], [0.0, 0.0001]])
+    w1 = 40.0
+    w2 = 50.0
+    x = np.array([x, y]).transpose()
+    # Calculate the probability density function (PDF) for each Gaussian
+    return (
+        w1 * mvn.pdf(x, mean1, cov1) / mvn.pdf(mean1, mean1, cov1)
+        + w2 * mvn.pdf(x, mean2, cov2) / mvn.pdf(mean2, mean2, cov2)
+        + 40
+    )
 
-def hedac(agent, param, pcloud):
+
+def hedac(agent, param, pcloud, update_interval=50):
     """
     Perform HEDAC exploration using the agent and the point cloud.
 
@@ -67,12 +66,14 @@ def hedac(agent, param, pcloud):
     estimated_density_arr = np.zeros_like(coverage_arr)
 
     # Initialize goal density
-    sample_points = torch.tensor(agent.x, dtype=torch.float32).reshape(1, -1)
-    # Make prediction
-    with torch.no_grad(), gpytorch.settings.fast_pred_var():
-        gpr_original_density = likelihood_real(model_real(sample_points))
 
-    density_sample = gpr_original_density.mean
+
+            
+    sample_points = torch.tensor(agent.x, dtype=torch.float32).reshape(1, -1)
+    density_sample = multivariate_gaussian(agent.x[0], agent.x[1])
+    print(density_sample)
+    density_sample = torch.tensor(density_sample, dtype=torch.float32, device=device).reshape(-1, 1).flatten()    
+    print(density_sample.shape)
     # print(stiffness_sample)
     # Construct training data
     train_x = sample_points.clone()
@@ -102,6 +103,7 @@ def hedac(agent, param, pcloud):
     # we normalize the goal because it should be a probability distribution
     goal_density = normalize_mat(goal_density)
     mean_tmp = normalize_mat(observed_pred.mean.cpu().numpy())
+    mean_not_normalized = observed_pred.mean.cpu().numpy()
     ut = np.array(goal_density)
 
     # we keep this and add coverage at each timestep on top of it
@@ -110,7 +112,7 @@ def hedac(agent, param, pcloud):
     # fig.show("browser")
     # for keeping the runtime of each timestep
     time_arr = np.zeros(param.timesteps)
-
+    stopped = False
     agent.t = 0  # reset the agent's time
     # do absolute minimum inside the main loop
     for t in range(param.timesteps):
@@ -158,21 +160,23 @@ def hedac(agent, param, pcloud):
         coverage_arr[..., t] = coverage
         heat_arr[..., t] = np.copy(ut)
         goal_density_arr[..., t] = goal_density
-        estimated_density_arr[..., t] = mean_tmp
+        estimated_density_arr[..., t] = mean_not_normalized
 
-        if t % 50 == 0 and t > 0:
-            print(f"Time step: {t}/{param.timesteps}")
+        if t % update_interval == 0 and t > 0:
+            # print(f"Time step: {t}/{param.timesteps}")
             # Update the goal density
             # Extract the trajectory
             sample_points = torch.tensor(
-                agent.x_arr[:t:5, :], dtype=torch.float32, device=device
+                agent.x_arr[:t:25, :], dtype=torch.float32, device=device
             )
-            print(sample_points.shape)
-            # Make prediction
-            with torch.no_grad(), gpytorch.settings.fast_pred_var():
-                gpr_original_density = likelihood_real(model_real(sample_points))
+            
 
-            density_sample = gpr_original_density.mean
+            density_sample = multivariate_gaussian(
+                agent.x_arr[:t:25, 0], agent.x_arr[:t:25, 1]
+            )
+            
+            density_sample = torch.tensor(density_sample, dtype=torch.float32, device=device).reshape(-1, 1).flatten()    
+               
 
             # Construct training data
             train_x = sample_points.clone()
@@ -183,7 +187,14 @@ def hedac(agent, param, pcloud):
             likelihood.train()
 
             model.set_train_data(train_x, train_y, strict=False)
-
+            hypers = {
+                # 'likelihood.noise_covar.noise': torch.tensor(3.0),
+                # 'covar_module.base_kernel.lengthscale': torch.tensor(4.0),
+                # 'covar_module.outputscale': torch.tensor(1.0),
+                "mean_module.constant": torch.min(train_y),
+            }
+            model.initialize(**hypers)
+            
             # Switch to evaluation mode
             model.eval()
             likelihood.eval()
@@ -193,25 +204,11 @@ def hedac(agent, param, pcloud):
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 observed_pred = likelihood(model(test_x))
 
-            # # Map stiffness to RGB colors using a colormap
-            # colormap = cm.get_cmap('jet')  # Change to 'jet' or other colormaps if needed
-            # colors = colormap(observed_pred.mean.cpu().numpy())[:, :3]  # Convert to RGB
-
-            # # Create Open3D point cloud object
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
-            # pcd.colors = o3d.utility.Vector3dVector(colors)
-
-            # # Visualise with Open3D
-            # o3d.visualization.draw_geometries([pcd], window_name="Target density")
-
             var_tmp = normalize_mat(observed_pred.variance.cpu().numpy())
             mean_tmp = normalize_mat(observed_pred.mean.cpu().numpy())
-            
+            mean_not_normalized = observed_pred.mean.cpu().numpy()
             # Set variance to zero along the borders of the point cloud
-            border_indices = get_border_indices(
-                pcloud.vertices, param.nb_boundary_neighbors
-            )
+
 
             goal_density = (
                     param.exploit_alpha * normalize_mat(np.maximum(mean_tmp - np.mean(mean_tmp), 0))
@@ -237,8 +234,28 @@ def hedac(agent, param, pcloud):
             # fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
 
             # fig.show()
-
-    return agent.x_arr, heat_arr, coverage_arr, time_arr, goal_density_arr, estimated_density_arr
+        rmse_now = np.sqrt(np.mean((mean_not_normalized - mean_original) ** 2))
+        if rmse_now <= 1.0:
+                stop_t = t
+                stopped = True
+                goal_density_arr[..., t] = goal_density
+                estimated_density_arr[..., t] = mean_not_normalized
+                break
+    # ---- Truncate outputs to stop_t ----
+    if not stopped:
+        stop_t = param.timesteps - 1
+    sl = slice(0, stop_t + 1)
+    return (
+        agent.x_arr[sl, :],
+        heat_arr[:, sl],
+        coverage_arr[:, sl],
+        time_arr[sl],
+        goal_density_arr[:, sl],
+        estimated_density_arr[:, sl],
+        stop_t,
+        stopped,
+    )
+    # return agent.x_arr, heat_arr, coverage_arr, time_arr, goal_density_arr, estimated_density_arr
 
 
 point_cloud_dir = "point_clouds/"
@@ -247,7 +264,7 @@ point_cloud_dir = "point_clouds/"
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
 obj_name = (
-    "plate_shapes"  # random IKEA plate with hand-drawn shapes
+    "processed_pointcloud_405"  # random IKEA plate with hand-drawn shapes
 )
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
@@ -258,9 +275,9 @@ class param:
     pass  # c-style struct
 
 
-param.exploit_alpha = 0.2  # total simulation timesteps
+param.exploit_alpha = 0.6  # total simulation timesteps
 
-param.timesteps = 5000  # total simulation timesteps
+param.timesteps = 40000  # total simulation timesteps
 
 # tuning: [1,100] increasing alpha result in global exploration closer to SS
 # decreasing alpha result in local exploration lower limited
@@ -269,13 +286,13 @@ param.alpha = 100
 param.method = "exact"
 
 # voxel filter size for downsampling the point cloud
-param.voxel_size = 0.002
+param.voxel_size = 0.0015
 # radius for the agent footprint that'd be used in coverage
 param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
-param.max_velocity = 0.1 * param.voxel_size * 2
-param.max_acceleration = 1.0 * param.max_velocity * 2
+param.max_velocity = 0.005
+param.max_acceleration = 0.0025
 
 # tuning: doesn't have much effect on exploration so we keep it at 1
 param.source_strength = 1
@@ -323,92 +340,39 @@ import open3d as o3d
 import torch
 
 
-def get_border_indices(vertices, nb_boundary_neighbors):
-    """
-    Identify the border indices of the point cloud.
-
-    Args:
-        vertices (np.ndarray): The vertices of the point cloud.
-        nb_boundary_neighbors (int): The number of neighbors to consider for boundary detection.
-
-    Returns:
-        np.ndarray: The indices of the border vertices.
-    """
-    from sklearn.neighbors import NearestNeighbors
-
-    # Find the nearest neighbors
-    nbrs = NearestNeighbors(n_neighbors=nb_boundary_neighbors).fit(vertices)
-    distances, indices = nbrs.kneighbors(vertices)
-
-    # Calculate the mean distance to the neighbors
-    mean_distances = distances.mean(axis=1)
-
-    # Identify the border vertices as those with the highest mean distance to neighbors
-    threshold = np.percentile(mean_distances, 85)  # Adjust this threshold as needed
-    border_indices = np.where(mean_distances > threshold)[0]
-
-    # Show the border vertices in the point cloud
-    # pcd = o3d.geometry.PointCloud()
-    # pcd.points = o3d.utility.Vector3dVector(vertices)
-    # pcd.colors = o3d.utility.Vector3dVector(np.zeros_like(vertices))
-    # colors = np.zeros_like(vertices)
-    # colors[border_indices] = [1, 0, 0]  # Red color for the border vertices
-    # pcd.colors = o3d.utility.Vector3dVector(colors)
-    # o3d.visualization.draw_geometries([pcd], window_name="Border vertices")
-
-    return border_indices
-
-
 # Load gp on pc class
 # ====================
-l = 0.010
+l = 0.005
 sigma = 1.0
 n_eig = 500
 km = rbf_manifold_kernel(pcloud.vertices, l, sigma, n_eig)
 
-# Construct training data
-train_x = torch.tensor(pcloud.vertices, dtype=torch.float32)
-train_y = torch.tensor(pcloud.u0, dtype=torch.float32)
-
-# Initialize the likelihood and model
-likelihood_real = gpytorch.likelihoods.GaussianLikelihood()
-model_real = GPROnPointCloud(train_x, train_y, likelihood_real, km, pcloud.vertices)
-
-# set to training mode and train
-model_real.train()
-likelihood_real.train()
-
-
-model_real.eval()
-likelihood_real.eval()
-
-import time
-
-start = time.time()
-with torch.no_grad():
-    observed_pred = likelihood_real(model_real(train_x))
-end = time.time()
-print(f"Time to predict: {end - start}")
-mean = observed_pred.mean.cpu().numpy()
+# Compute original distribution 
+original_density = np.array(
+    [multivariate_gaussian(x, y) for x, y, z in pcloud.vertices]
+)
+global mean_original
+mean_original = original_density
 # var = observed_pred.variance.cpu().numpy()
 
 
-camera = dict(
-    up=dict(x=0, y=1, z=0), center=dict(x=0, y=0, z=0), eye=dict(x=0, y=0.7, z=1.25)
-)
+# camera = dict(
+#     up=dict(x=0, y=1, z=0), center=dict(x=0, y=0, z=0), eye=dict(x=0, y=0.7, z=1.25)
+# )
 
-plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean)
-fig = go.Figure(plot)
-update_figure(fig)
-fig.update_layout(scene_camera=camera)
+# plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean_original)
+# fig = go.Figure(plot)
+# update_figure(fig)
+# fig.update_layout(scene_camera=camera)
 
-fig.show("browser")
+# fig.show("browser")
 
 agent = SecondOrderAgent(
     x=np.zeros(3),
     max_velocity=param.max_velocity,
     max_acceleration=param.max_acceleration * 2,
     dim_t=param.timesteps,
+    dt=0.01
 )
 
 # agent = FirstOrderAgent(
@@ -430,45 +394,94 @@ agent.radius = param.agent_radius
 # fig = go.Figure(plots)
 # fig.show("browser")
 
-x_arr, heat_arr, coverage_arr, time_arr, goal_arr, estimated_density_arr = hedac(agent, param, pcloud)
+# Run HEDAC with different alpha values
+alphas = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+results = {}
+
+results = {alpha: {'ergodic_metrics': [], 'rmses': [], 'stop_times': []} for alpha in alphas}
+
+for alpha_val in alphas:
+    print(f"\n{'='*50}")
+    print(f"Running HEDAC with alpha={alpha_val}")
+    print(f"{'='*50}")
+
+    param.exploit_alpha = alpha_val
+
+    for sim in range(50):  # Run 3 simulations for each alpha
+        # Reset agent for each run
+        agent = SecondOrderAgent(
+            x=np.zeros(3),
+            max_velocity=param.max_velocity,
+            max_acceleration=param.max_acceleration * 2,
+            dim_t=param.timesteps,
+            dt=0.01
+        )
+        random_vertex = np.random.randint(0, len(pcloud.vertices))
+        agent.x = pcloud.vertices[random_vertex]
+        agent.radius = param.agent_radius
+
+        x_arr, heat_arr, coverage_arr, time_arr, goal_arr, estimated_density_arr, stop_t, stopped = hedac(
+            agent, param, pcloud, update_interval=50
+        )
+
+        # Compute ergodic metric (coverage-goal density difference)
+        final_coverage = coverage_arr[..., -1]
+        final_coverage_normalized = normalize_mat(final_coverage)
+        ergodic_metric = np.linalg.norm(final_coverage_normalized - normalize_mat(goal_arr[..., -1]))
+
+        # Compute RMSE between estimated and goal distribution
+        rmse = np.sqrt(np.mean((estimated_density_arr[..., -1] - mean_original)**2))
+
+        results[alpha_val]['ergodic_metrics'].append(ergodic_metric)
+        results[alpha_val]['rmses'].append(rmse)
+        results[alpha_val]['stop_times'].append(stop_t)
 
 
-plots = visualize_point_cloud(
-    pcloud.vertices,
-    colors=estimated_density_arr[..., -1],
-    # colors=heat_arr[...,-1],
-    is_show_plot=False,
-    point_size=5,
-)
-fig = visualize_trajectory(x_arr[:, :], plots, color="black")
+# Save the results in a numpy file
+np.savez_compressed("hedac_alpha_comparison_results.npz", results=results)
 
-fig.show("browser")
+# Create box plots comparing results across different alpha values
+fig, axes = plt.subplots(1, 2, figsize=(14, 10))
+fig.suptitle('HEDAC Performance Comparison Across Alpha Values', fontsize=16)
 
-# import plotly.io as pio
+# Plot 1: Ergodic Metric Comparison
+ax = axes[0]
+ax.boxplot([results[a]['ergodic_metrics'] for a in alphas], tick_labels=alphas)
+ax.set_xlabel('Alpha')
+ax.set_ylabel('Ergodic Metric (L2 norm)')
+ax.set_title('Ergodic Metric vs Alpha')
+ax.grid(axis='y', alpha=0.3)
 
-# animate_trajectory_pcloud(
-#     x_arr,
-#     vertices=pcloud.vertices,
-#     color_frames=goal_arr,
-#     timesteps=param.timesteps,
-#     save_path="pl_3dk_target_distribution.html",
-# )
+# Plot 2: Time Comparison
+ax = axes[1]
+ax.boxplot([results[a]['stop_times'] for a in alphas], tick_labels=alphas)
+ax.set_xlabel('Alpha')
+ax.set_ylabel('Stop Time')
+ax.set_title('Stop Time vs Alpha')
+ax.grid(axis='y', alpha=0.3)
 
-# animate_trajectory_pcloud(
-#     x_arr,
-#     vertices=pcloud.vertices,
-#     color_frames=heat_arr,
-#     timesteps=param.timesteps,
-#     save_path="pl_3dk_goal_density.html",
-# )
+plt.tight_layout()
+plt.savefig('alpha_comparison_results_boxplots.png', dpi=150, bbox_inches='tight')
+plt.show()
 
-# --- Example usage ---
-# Choose 5 steps to visualise
+# Print summary statistics
+print(f"\n{'='*50}")
+print("SUMMARY OF RESULTS")
+print(f"{'='*50}")
+for alpha_val in alphas:
+    ergodic_metrics = results[alpha_val]['ergodic_metrics']
+    rmses = results[alpha_val]['rmses']
+    stop_times = results[alpha_val]['stop_times']
+    print(f"Alpha: {alpha_val:.1f}")
+    print(f"  Ergodic Metric - Mean: {np.mean(ergodic_metrics):.6f}, Std: {np.std(ergodic_metrics):.6f}")
+    print(f"  RMSE           - Mean: {np.mean(rmses):.6f}, Std: {np.std(rmses):.6f}")
+    print(f"  Stop Times     - Mean: {np.mean(stop_times):.2f}, Std: {np.std(stop_times):.2f}")
+
 steps_to_plot = [0, 100, 500, 1000, 2000]
 
 plot_distribution_evolution_column_auto(
     vertices=pcloud.vertices,
-    original_density=mean,
+    original_density=original_density,
     estimated_density_arr=estimated_density_arr,
     pdf_name="distribution_evolution6_" + obj_name + ".pdf",
     agent_trajectory=x_arr[:, :],
