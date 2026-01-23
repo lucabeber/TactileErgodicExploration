@@ -8,3 +8,7 @@ __pycache__
 *.html
 *.pth
 __pycache__
+*.png
+bags/
+results/
+data/

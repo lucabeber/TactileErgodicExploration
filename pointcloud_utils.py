@@ -23,6 +23,33 @@ from scipy.spatial import KDTree
 from sklearn.preprocessing import PolynomialFeatures
 
 
+def get_border_indices(vertices, nb_boundary_neighbors):
+    """
+    Identify the border indices of the point cloud.
+
+    Args:
+        vertices (np.ndarray): The vertices of the point cloud.
+        nb_boundary_neighbors (int): The number of neighbors to consider for boundary detection.
+
+    Returns:
+        np.ndarray: The indices of the border vertices.
+    """
+    from sklearn.neighbors import NearestNeighbors
+
+    # Find the nearest neighbors
+    nbrs = NearestNeighbors(n_neighbors=nb_boundary_neighbors).fit(vertices)
+    distances, indices = nbrs.kneighbors(vertices)
+
+    # Calculate the mean distance to the neighbors
+    mean_distances = distances.mean(axis=1)
+
+    # Identify the border vertices as those with the highest mean distance to neighbors
+    threshold = np.percentile(mean_distances, 85)  # Adjust this threshold as needed
+    border_indices = np.where(mean_distances > threshold)[0]
+
+    return border_indices
+
+
 def compute_coverage_residual(initial_heat_arr, coverage_arr):
     """
     Compute the normalized residual between the goal density and the

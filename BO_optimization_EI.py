@@ -13,11 +13,9 @@ from scipy.sparse.linalg import splu
 from plotting_utils import *
 from pointcloud_utils import *
 from virtual_agents import SecondOrderAgent
-
-point_cloud_dir = "point_clouds/"
+import config
 
 # Select the object to explore
-
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
 obj_name = "plate_shapes"  # random IKEA plate with hand-drawn shapes
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
@@ -61,7 +59,7 @@ param.nb_boundary_neighbors = 40
 
 # Select the object and load the point cloud
 # ==========================================
-filename = f"{point_cloud_dir}{obj_name}.ply"
+filename = config.get_point_cloud_path(f"{obj_name}.ply")
 pcloud = process_point_cloud(filename, param)
 
 
@@ -83,6 +81,14 @@ import os
 import matplotlib.cm as cm
 
 from virtual_agents import SecondOrderAgent
+
+# Set device and dtype early (before using them)
+# Stick with CPU for stability with botorch/gpytorch
+device = torch.device("cpu")
+dtype = torch.float64
+print("Using CPU device")
+torch.set_default_dtype(dtype)
+torch.set_default_device(device)
 
 def get_border_indices(vertices, nb_boundary_neighbors):
     """
@@ -121,8 +127,9 @@ def get_border_indices(vertices, nb_boundary_neighbors):
     return border_indices
 
 # Construct training data
-train_x = torch.tensor(pcloud.vertices, dtype=torch.float64)
-train_y = torch.tensor(pcloud.u0, dtype=torch.float64)
+# Note: dtype will be set based on device (float32 for MPS, float64 for CPU/CUDA)
+train_x = torch.tensor(pcloud.vertices, dtype=dtype, device=device)
+train_y = torch.tensor(pcloud.u0, dtype=dtype, device=device)
 
 
 
@@ -140,23 +147,32 @@ class GPModel(gpytorch.models.ExactGP):
 
 likelihood_real = gpytorch.likelihoods.GaussianLikelihood()
 model_real = GPModel(train_x, train_y, likelihood_real)
-model_real = model_real.double()
-likelihood_real.double()
+# Convert to appropriate dtype based on device
+if dtype == torch.float32:
+    model_real = model_real.float()
+    likelihood_real = likelihood_real.float()
+else:
+    model_real = model_real.double()
+    likelihood_real = likelihood_real.double()
 
 # Training the model
 model_real.train()
 likelihood_real.train()
 
-model_state_path = obj_name + "_model_state.pth"
-likelihood_state_path = obj_name + "_likelihood_state.pth"
+model_state_path = config.get_model_path(f"{obj_name}_model_state.pth")
+likelihood_state_path = config.get_model_path(f"{obj_name}_likelihood_state.pth")
 
 if os.path.exists(model_state_path) and os.path.exists(likelihood_state_path):
     # Load parameters from the saved model
-    model_real.load_state_dict(torch.load(model_state_path))
-    likelihood_real.load_state_dict(torch.load(likelihood_state_path))
-    # Convert to double precision after loading
-    model_real = model_real.double()
-    likelihood_real.double()
+    model_real.load_state_dict(torch.load(str(model_state_path)))
+    likelihood_real.load_state_dict(torch.load(str(likelihood_state_path)))
+    # Convert to appropriate dtype after loading
+    if dtype == torch.float32:
+        model_real = model_real.float()
+        likelihood_real = likelihood_real.float()
+    else:
+        model_real = model_real.double()
+        likelihood_real = likelihood_real.double()
 else:
     optimizer = torch.optim.Adam(model_real.parameters(), lr=0.2)
     mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihood_real, model_real)
@@ -171,8 +187,8 @@ else:
         print(f"Iter {i+1}/{training_iterations} - Loss: {loss.item()}")
 
     # Save parameters
-    torch.save(model_real.state_dict(), model_state_path)
-    torch.save(likelihood_real.state_dict(), likelihood_state_path)
+    torch.save(model_real.state_dict(), str(model_state_path))
+    torch.save(likelihood_real.state_dict(), str(likelihood_state_path))
 
 # Switch to evaluation mode
 model_real.eval()
@@ -180,7 +196,7 @@ likelihood_real.eval()
 
 # Plot the predicted density
 with torch.no_grad(), gpytorch.settings.fast_pred_var():
-    test_x = torch.tensor(pcloud.vertices, dtype=torch.float64)
+    test_x = torch.tensor(pcloud.vertices, dtype=dtype, device=device)
     observed_pred = likelihood_real(model_real(test_x))
 
 # # Map stiffness to RGB colors using a colormap
@@ -217,10 +233,7 @@ import time
 
 # Constants
 MM_TO_UNIT = 1.0  # Adjust based on your point cloud scale
-dtype = torch.float64
-device = torch.device("cpu")
-torch.set_default_dtype(dtype)
-torch.set_default_device(device)
+# Note: device and dtype are already set earlier in the file
 
 # Precompute geodesic distances on point cloud using graph-based approach
 def precompute_geodesic_distances(vertices):
@@ -255,25 +268,29 @@ def get_geodesic_distance(idx_a, idx_b):
 
 # --- GP Model ---
 def get_fitted_model(X, Y):
-    # Ensure inputs are float64
-    X = X.to(dtype=torch.float64)
-    Y = Y.to(dtype=torch.float64)
+    # Ensure inputs use the correct dtype for the device
+    X = X.to(dtype=dtype, device=device)
+    Y = Y.to(dtype=dtype, device=device)
     # Ensure Y is 2D: (n_samples, 1)
     if Y.dim() == 1:
         Y = Y.unsqueeze(-1)
-    
+
     # Standardize Y to zero mean and unit variance to avoid warnings and improve training
     Y_mean = Y.mean()
     Y_std = Y.std()
-    
+
     # Handle case where Y has only 1 sample or very small variance
     if Y_std < 1e-8 or torch.isnan(Y_std):
-        Y_std = torch.tensor(1.0, dtype=torch.float64)
-    
+        Y_std = torch.tensor(1.0, dtype=dtype, device=device)
+
     Y_normalized = (Y - Y_mean) / Y_std
-    
+
     model_gp = SingleTaskGP(X, Y_normalized, outcome_transform=None)
-    model_gp = model_gp.double()
+    # Convert to appropriate dtype
+    if dtype == torch.float32:
+        model_gp = model_gp.float()
+    else:
+        model_gp = model_gp.double()
     mll = ExactMarginalLogLikelihood(model_gp.likelihood, model_gp)
     fit_gpytorch_mll(mll)
     return model_gp, Y_mean, Y_std
@@ -285,16 +302,16 @@ bounds = torch.tensor(
 
 def f_torch(X):
     """Evaluate predicted density at 3D points using the trained GP model."""
-    # Ensure X is float64 to match model dtype
-    X = X.to(dtype=torch.float64)
+    # Ensure X uses correct dtype for device
+    X = X.to(dtype=dtype, device=device)
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
         preds = likelihood_real(model_real(X))
-    return preds.mean.unsqueeze(-1).to(dtype=dtype)
+    return preds.mean.unsqueeze(-1)
 
 def generate_initial_data(n=1):
     # Random points from the point cloud
     indices = np.random.choice(len(pcloud.vertices), n, replace=False)
-    X_init = torch.tensor(pcloud.vertices[indices], dtype=torch.float64, device=device)
+    X_init = torch.tensor(pcloud.vertices[indices], dtype=dtype, device=device)
     Y_init = f_torch(X_init)
     return X_init, Y_init, indices
 
@@ -329,18 +346,18 @@ def bayesian_optimisation(n_iter=100):
             unvisited_local = [idx for idx in range(len(pcloud.vertices)) if idx not in visited_indices]
         
         local_vertices = torch.tensor(
-            pcloud.vertices[unvisited_local], dtype=torch.float64, device=device
+            pcloud.vertices[unvisited_local], dtype=dtype, device=device
         )
 
         # Evaluate acquisition function on local vertices
         with torch.no_grad():
             # Reshape for acquisition function evaluation: (n_points, 1, 3)
-            acq_values = acq_func(local_vertices.unsqueeze(1).double())
+            acq_values = acq_func(local_vertices.unsqueeze(1))
         
         best_local_idx = torch.argmax(acq_values).item()
         new_idx = unvisited_local[best_local_idx]
         new_x = torch.tensor(
-            pcloud.vertices[new_idx], dtype=torch.float64, device=device
+            pcloud.vertices[new_idx], dtype=dtype, device=device
         ).unsqueeze(0)
 
         # Compute geodesic distance
@@ -352,9 +369,9 @@ def bayesian_optimisation(n_iter=100):
         
         # Linear interpolation in 3D (approximation of geodesic)
         last_x = torch.tensor(
-            pcloud.vertices[last_idx], dtype=torch.float64, device=device
+            pcloud.vertices[last_idx], dtype=dtype, device=device
         ).unsqueeze(0)
-        alpha = torch.linspace(0, 1, num_steps + 1, dtype=torch.float64, device=device)[1:]
+        alpha = torch.linspace(0, 1, num_steps + 1, dtype=dtype, device=device)[1:]
         path_x = last_x + alpha.unsqueeze(1) * (new_x - last_x)
         4
         new_y = f_torch(path_x)
@@ -385,7 +402,7 @@ model_gpr, y_mean_gpr, y_std_gpr = get_fitted_model(X_train, Y_train)
 
 # Evaluate the trained GPR model on all vertices for visualization
 with torch.no_grad(), gpytorch.settings.fast_pred_var():
-    all_pred_gpr = model_gpr(torch.tensor(pcloud.vertices, dtype=torch.float64))
+    all_pred_gpr = model_gpr(torch.tensor(pcloud.vertices, dtype=dtype, device=device))
     pred_mean_gpr = all_pred_gpr.mean.cpu().numpy()
     pred_normalized = (pred_mean_gpr - pred_mean_gpr.min()) / (pred_mean_gpr.max() - pred_mean_gpr.min() + 1e-6)
 # Create visualization with explored points and paths

@@ -34,6 +34,7 @@ import robust_laplacian
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import splu
 
+import config
 from gpr_on_point_cloud import *
 from plotting_utils import *
 from pointcloud import Pointcloud
@@ -65,6 +66,9 @@ def hedac(agent, param, pcloud):
     heat_arr = np.zeros_like(coverage_arr)
     goal_density_arr = np.zeros_like(coverage_arr)
     estimated_density_arr = np.zeros_like(coverage_arr)
+
+    # Array to store 3D speeds at each timestep
+    speed_arr = np.zeros(param.timesteps)
 
     # Initialize goal density
     sample_points = torch.tensor(agent.x, dtype=torch.float32).reshape(1, -1)
@@ -153,7 +157,14 @@ def hedac(agent, param, pcloud):
             scalar_diffusion_solver.gradient_ut_3d[neighbor_ids[:10]], axis=0
         )
 
+        # Store previous position before update
+        prev_x = np.copy(agent.x)
+
         agent.update(gradient)
+
+        # Calculate 3D speed (Euclidean distance traveled in this timestep)
+        displacement = agent.x - prev_x
+        speed_arr[t] = np.linalg.norm(displacement)
 
         coverage_arr[..., t] = coverage
         heat_arr[..., t] = np.copy(ut)
@@ -193,30 +204,17 @@ def hedac(agent, param, pcloud):
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 observed_pred = likelihood(model(test_x))
 
-            # # Map stiffness to RGB colors using a colormap
-            # colormap = cm.get_cmap('jet')  # Change to 'jet' or other colormaps if needed
-            # colors = colormap(observed_pred.mean.cpu().numpy())[:, :3]  # Convert to RGB
-
-            # # Create Open3D point cloud object
-            # pcd = o3d.geometry.PointCloud()
-            # pcd.points = o3d.utility.Vector3dVector(pcloud.vertices)
-            # pcd.colors = o3d.utility.Vector3dVector(colors)
-
-            # # Visualise with Open3D
-            # o3d.visualization.draw_geometries([pcd], window_name="Target density")
-
             var_tmp = normalize_mat(observed_pred.variance.cpu().numpy())
             mean_tmp = normalize_mat(observed_pred.mean.cpu().numpy())
-            
+
             # Set variance to zero along the borders of the point cloud
             border_indices = get_border_indices(
                 pcloud.vertices, param.nb_boundary_neighbors
             )
 
-            goal_density = (
-                    param.exploit_alpha * normalize_mat(np.maximum(mean_tmp - np.mean(mean_tmp), 0))
-                    + (1 - param.exploit_alpha) * normalize_mat(var_tmp)
-            )
+            goal_density = param.exploit_alpha * normalize_mat(
+                np.maximum(mean_tmp - np.mean(mean_tmp), 0)
+            ) + (1 - param.exploit_alpha) * normalize_mat(var_tmp)
             goal_density = normalize_mat(goal_density)
             # goal_density[border_indices] = 0
             # plots = visualize_point_cloud(
@@ -238,17 +236,19 @@ def hedac(agent, param, pcloud):
 
             # fig.show()
 
-    return agent.x_arr, heat_arr, coverage_arr, time_arr, goal_density_arr, estimated_density_arr
+    return (
+        agent.x_arr,
+        heat_arr,
+        coverage_arr,
+        time_arr,
+        goal_density_arr,
+        estimated_density_arr,
+    )
 
-
-point_cloud_dir = "point_clouds/"
 
 # Select the object to explore
-
-obj_name = "bun270_X" # Stanford bunny with X projected as the target
-# obj_name = (
-#     "plate_shapes"  # random IKEA plate with hand-drawn shapes
-# )
+obj_name = "bun270_X"  # Stanford bunny with X projected as the target
+# obj_name = "plate_shapes"  # random IKEA plate with hand-drawn shapes
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
 experiment_index = 2  # choose which initial position to use from x0_arr_10.npz
@@ -271,7 +271,7 @@ param.method = "exact"
 # voxel filter size for downsampling the point cloud
 param.voxel_size = 0.002
 # radius for the agent footprint that'd be used in coverage
-param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
+param.agent_radius = 2.5 * param.voxel_size  # for the cup and the bunny
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
 param.max_velocity = 0.1 * param.voxel_size * 2
@@ -293,7 +293,7 @@ param.nb_boundary_neighbors = 40
 
 # Select the object and load the point cloud
 # ==========================================
-filename = f"{point_cloud_dir}{obj_name}.ply"
+filename = config.get_point_cloud_path(f"{obj_name}.ply")
 pcloud = process_point_cloud(filename, param)
 pcd_helper = Pointcloud(pcloud.vertices)
 boundary_normals = pcd_helper.get_boundary_normals()
@@ -317,46 +317,10 @@ import gpytorch
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 import open3d as o3d
+import torch
 
 # Define the goal density
 # ========================
-import torch
-
-
-def get_border_indices(vertices, nb_boundary_neighbors):
-    """
-    Identify the border indices of the point cloud.
-
-    Args:
-        vertices (np.ndarray): The vertices of the point cloud.
-        nb_boundary_neighbors (int): The number of neighbors to consider for boundary detection.
-
-    Returns:
-        np.ndarray: The indices of the border vertices.
-    """
-    from sklearn.neighbors import NearestNeighbors
-
-    # Find the nearest neighbors
-    nbrs = NearestNeighbors(n_neighbors=nb_boundary_neighbors).fit(vertices)
-    distances, indices = nbrs.kneighbors(vertices)
-
-    # Calculate the mean distance to the neighbors
-    mean_distances = distances.mean(axis=1)
-
-    # Identify the border vertices as those with the highest mean distance to neighbors
-    threshold = np.percentile(mean_distances, 85)  # Adjust this threshold as needed
-    border_indices = np.where(mean_distances > threshold)[0]
-
-    # Show the border vertices in the point cloud
-    # pcd = o3d.geometry.PointCloud()
-    # pcd.points = o3d.utility.Vector3dVector(vertices)
-    # pcd.colors = o3d.utility.Vector3dVector(np.zeros_like(vertices))
-    # colors = np.zeros_like(vertices)
-    # colors[border_indices] = [1, 0, 0]  # Red color for the border vertices
-    # pcd.colors = o3d.utility.Vector3dVector(colors)
-    # o3d.visualization.draw_geometries([pcd], window_name="Border vertices")
-
-    return border_indices
 
 
 # Load gp on pc class
@@ -397,25 +361,25 @@ camera = dict(
     up=dict(x=0, y=1, z=0), center=dict(x=0, y=0, z=0), eye=dict(x=0, y=0.7, z=1.25)
 )
 
-plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean)
-fig = go.Figure(plot)
-update_figure(fig)
-fig.update_layout(scene_camera=camera)
+# plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean)
+# fig = go.Figure(plot)
+# update_figure(fig)
+# fig.update_layout(scene_camera=camera)
 
-fig.show("browser")
+# fig.show("browser")
 
-agent = SecondOrderAgent(
-    x=np.zeros(3),
-    max_velocity=param.max_velocity,
-    max_acceleration=param.max_acceleration * 2,
-    dim_t=param.timesteps,
-)
-
-# agent = FirstOrderAgent(
+# agent = SecondOrderAgent(
 #     x=np.zeros(3),
-#     dim_t=param.timesteps,
 #     max_velocity=param.max_velocity,
+#     max_acceleration=param.max_acceleration * 2,
+#     dim_t=param.timesteps,
 # )
+
+agent = FirstOrderAgent(
+    x=np.zeros(3),
+    dim_t=param.timesteps,
+    max_velocity=param.max_velocity,
+)
 
 random_vertex = np.random.randint(0, len(pcloud.vertices))
 # agent.x = pcloud.vertices[810]
@@ -430,7 +394,9 @@ agent.radius = param.agent_radius
 # fig = go.Figure(plots)
 # fig.show("browser")
 
-x_arr, heat_arr, coverage_arr, time_arr, goal_arr, estimated_density_arr = hedac(agent, param, pcloud)
+x_arr, heat_arr, coverage_arr, time_arr, goal_arr, estimated_density_arr = hedac(
+    agent, param, pcloud
+)
 
 
 plots = visualize_point_cloud(
@@ -444,23 +410,33 @@ fig = visualize_trajectory(x_arr[:, :], plots, color="black")
 
 fig.show("browser")
 
-# import plotly.io as pio
+# Generate animated visualizations
+print("\nGenerating animated visualizations...")
 
-# animate_trajectory_pcloud(
-#     x_arr,
-#     vertices=pcloud.vertices,
-#     color_frames=goal_arr,
-#     timesteps=param.timesteps,
-#     save_path="pl_3dk_target_distribution.html",
-# )
+# Animation 1: Trajectory evolution with goal density (what the agent is exploring)
+print("Creating goal density animation...")
+goal_html_path = config.get_animation_path(f"ergodic_goal_density_{obj_name}.html")
+animate_trajectory_pcloud(
+    x_arr=x_arr,
+    vertices=pcloud.vertices,
+    color_frames=goal_arr,
+    timesteps=param.timesteps,
+    save_path=str(goal_html_path),
+)
+print(f"Goal density animation saved to {goal_html_path}")
 
-# animate_trajectory_pcloud(
-#     x_arr,
-#     vertices=pcloud.vertices,
-#     color_frames=heat_arr,
-#     timesteps=param.timesteps,
-#     save_path="pl_3dk_goal_density.html",
-# )
+# Animation 2: Trajectory evolution with estimated density (what the agent learned)
+print("\nCreating estimated density animation...")
+est_html_path = config.get_animation_path(f"ergodic_estimated_density_{obj_name}.html")
+animate_trajectory_pcloud(
+    x_arr=x_arr,
+    vertices=pcloud.vertices,
+    color_frames=estimated_density_arr,
+    timesteps=param.timesteps,
+    save_path=str(est_html_path),
+)
+print(f"Estimated density animation saved to {est_html_path}")
+print("Animation opened in browser!")
 
 # --- Example usage ---
 # Choose 5 steps to visualise
@@ -470,6 +446,6 @@ plot_distribution_evolution_column_auto(
     vertices=pcloud.vertices,
     original_density=mean,
     estimated_density_arr=estimated_density_arr,
-    pdf_name="distribution_evolution6_" + obj_name + ".pdf",
+    pdf_name=str(config.get_plot_path(f"distribution_evolution_{obj_name}.pdf")),
     agent_trajectory=x_arr[:, :],
 )

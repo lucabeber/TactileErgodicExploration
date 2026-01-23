@@ -148,7 +148,7 @@ def visualize_point_cloud(
     color_arr = np.asarray(pcd.colors)
 
     marker = dict(
-        size=point_size,    
+        size=point_size,
         showscale=True,
         opacity=0.8,
     )
@@ -260,6 +260,7 @@ def animate_trajectory_pcloud(
     circle_radius=0.1,
     look_step=50,
     save_path=None,
+    is_show=True,
 ):
     point_size = 10
     # Set the camera
@@ -320,7 +321,7 @@ def animate_trajectory_pcloud(
     )
 
     # Animation Frames (Update Trajectory + Colors)
-    timestep_multiplier = 100
+    timestep_multiplier = 10
     n_frames = timesteps // timestep_multiplier
 
     # Precompute unit circle in x-y plane
@@ -388,7 +389,7 @@ def animate_trajectory_pcloud(
         #     trace_ids = [0, 1, 2]
 
         # Add frame
-        frames.append(go.Frame(data=frame_data, name=f"frame{k}", traces=[0,1,2]))
+        frames.append(go.Frame(data=frame_data, name=f"frame{k}", traces=[0, 1, 2]))
     fig.update(frames=frames)
 
     # Sliders
@@ -425,17 +426,23 @@ def animate_trajectory_pcloud(
     if save_path:
         fig.write_html(save_path)
 
-    fig.show()
+    if is_show:
+        fig.show("browser")
+
+    return fig
 
 
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
-def plot_distribution_evolution_column_auto(vertices,
-                                            original_density,
-                                            estimated_density_arr,
-                                            pdf_name="distribution_evolution_column.pdf",
-                                            agent_trajectory=None):
+
+def plot_distribution_evolution_column_auto(
+    vertices,
+    original_density,
+    estimated_density_arr,
+    pdf_name="distribution_evolution_column.pdf",
+    agent_trajectory=None,
+):
     """
     Creates a 1-column × 6-row figure.
     Row 1 = original distribution
@@ -448,10 +455,7 @@ def plot_distribution_evolution_column_auto(vertices,
     # Automatically pick 5 evenly spaced steps (excluding the last one for safety)
     steps = np.linspace(0, num_steps - 1, 6, dtype=int)[1:]  # skip the first (original)
 
-    fig, axes = plt.subplots(
-        nrows=1, ncols=6,
-        constrained_layout=True
-    )
+    fig, axes = plt.subplots(nrows=1, ncols=6, constrained_layout=True)
 
     # Remove grid, ticks, labels, titles
     for ax in axes:
@@ -470,8 +474,14 @@ def plot_distribution_evolution_column_auto(vertices,
             for spine in ax.spines.values():
                 spine.set_visible(False)
     # Column 1: original distribution
-    axes[0].scatter(vertices[:, 0], vertices[:, 1],
-                    c=original_density, s=1.5, cmap="viridis",rasterized=True)
+    axes[0].scatter(
+        vertices[:, 0],
+        vertices[:, 1],
+        c=original_density,
+        s=1.5,
+        cmap="viridis",
+        rasterized=True,
+    )
 
     # Columns 2–6: estimated distributions
     for i, step in enumerate(steps):
@@ -481,19 +491,42 @@ def plot_distribution_evolution_column_auto(vertices,
             c=estimated_density_arr[:, step],
             s=1.5,  # decreased point size
             cmap="viridis",
-            rasterized=True
+            rasterized=True,
         )
 
         # Overlay the agent trajectory in black (if provided)
         if agent_trajectory is not None:
             traj = np.asarray(agent_trajectory)
             if traj.ndim == 2 and traj.shape[1] >= 2:
-                axes[i + 1].plot(traj[:step, 0], traj[:step, 1], color="r", linewidth=0.8, zorder=10, alpha=0.6)
+                axes[i + 1].plot(
+                    traj[:step, 0],
+                    traj[:step, 1],
+                    color="r",
+                    linewidth=0.8,
+                    zorder=10,
+                    alpha=0.6,
+                )
                 # Add orange point at beginning
-                axes[i + 1].plot(traj[0, 0], traj[0, 1], marker="o", color="orange", markersize=1, zorder=11, alpha=1.0)
+                axes[i + 1].plot(
+                    traj[0, 0],
+                    traj[0, 1],
+                    marker="o",
+                    color="orange",
+                    markersize=1,
+                    zorder=11,
+                    alpha=1.0,
+                )
                 # Add violet point at end
                 if step > 0:
-                    axes[i + 1].plot(traj[step - 1, 0], traj[step - 1, 1], marker="o", color="violet", markersize=1, zorder=11,alpha=1.0)
+                    axes[i + 1].plot(
+                        traj[step - 1, 0],
+                        traj[step - 1, 1],
+                        marker="o",
+                        color="violet",
+                        markersize=1,
+                        zorder=11,
+                        alpha=1.0,
+                    )
             elif traj.ndim == 1 and traj.size >= 2:
                 axes[i + 1].plot(traj[0], traj[1], marker="o", color="r", zorder=10)
 
@@ -503,5 +536,3 @@ def plot_distribution_evolution_column_auto(vertices,
 
     plt.close(fig)
     print(f"Saved '{pdf_name}' with steps: {steps.tolist()}")
-
-
