@@ -24,9 +24,6 @@ import robust_laplacian
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import splu
 
-import sys
-sys.path.insert(0, '..')
-
 from tactile_ergodic.utils import config
 from tactile_ergodic.exploration import ExplorationWithGP
 from tactile_ergodic.utils.plotting_utils import *
@@ -95,7 +92,7 @@ class HEDAC(ExplorationWithGP):
         HEDAC-specific point cloud setup: Laplacian matrices and heat equation solver.
         """
         # Calculate dt and h for heat equation (HEDAC-specific)
-        from pointcloud_utils import calculate_dt
+        from tactile_ergodic.utils.pointcloud_utils import calculate_dt
         self.pcloud.dt, self.pcloud.h = calculate_dt(self.pcloud.vertices, self.alpha)
         print(f"dt: {self.pcloud.dt:.3e}, h: {self.pcloud.h:.3e}, s: {self.voxel_size:.3e}")
 

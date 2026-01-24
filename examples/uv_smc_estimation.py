@@ -24,9 +24,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device: ", device)
 torch.set_default_device(device)
 
-import sys
-sys.path.insert(0, '..')
-
 from tactile_ergodic.utils import config
 from tactile_ergodic.exploration import ExplorationWithGP
 from tactile_ergodic.utils.plotting_utils import *

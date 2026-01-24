@@ -7,7 +7,8 @@ import os
 from pathlib import Path
 
 # Base directory (project root)
-BASE_DIR = Path(__file__).parent
+# Go up two levels: config.py -> tactile_ergodic/utils -> tactile_ergodic -> repository root
+BASE_DIR = Path(__file__).parent.parent.parent
 
 # Data directories
 POINT_CLOUD_DIR = BASE_DIR / "point_clouds"
