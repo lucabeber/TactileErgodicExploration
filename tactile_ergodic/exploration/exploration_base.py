@@ -13,8 +13,8 @@ import numpy as np
 import torch
 from abc import ABC, abstractmethod
 
-from density_estimator import create_density_estimator
-from pointcloud_utils import process_point_cloud
+from ..estimation.density_estimator import create_density_estimator
+from ..utils.pointcloud_utils import process_point_cloud
 
 
 class ExplorationWithGP(ABC):

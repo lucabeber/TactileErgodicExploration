@@ -114,8 +114,6 @@ def process_point_cloud(filename, param):
     # compute the K-D tree for the nearest neighbor queries later
     pcloud.pcd_tree = o3d.geometry.KDTreeFlann(pcd)
 
-    pcloud.dt, pcloud.h = calculate_dt(pcloud.vertices, param.alpha)
-    print(f"dt: {pcloud.dt:.3e}, h: {pcloud.h:.3e}, s: {param.voxel_size:.3e}")
     return pcloud
 
 

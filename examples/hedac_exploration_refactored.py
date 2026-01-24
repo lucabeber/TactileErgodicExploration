@@ -24,13 +24,14 @@ import robust_laplacian
 from scipy.sparse import csc_matrix
 from scipy.sparse.linalg import splu
 
-import config
-from exploration_base import ExplorationWithGP
-from plotting_utils import *
-from pointcloud import Pointcloud
-from pointcloud_scalar_diffusion import PointcloudScalarDiffusion
-from pointcloud_utils import *
-from virtual_agents import FirstOrderAgent, SecondOrderAgent
+import sys
+sys.path.insert(0, '..')
+
+from tactile_ergodic.utils import config
+from tactile_ergodic.exploration import ExplorationWithGP
+from tactile_ergodic.utils.plotting_utils import *
+from tactile_ergodic.utils import Pointcloud, PointcloudScalarDiffusion, FirstOrderAgent, SecondOrderAgent
+from tactile_ergodic.utils.pointcloud_utils import *
 
 
 class HEDAC(ExplorationWithGP):

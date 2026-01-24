@@ -12,8 +12,8 @@ Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
 import numpy as np
 import torch
 import gpytorch
-from pointcloud_utils import normalize_mat, get_border_indices
-from gpr_on_point_cloud import rbf_manifold_kernel, GPROnPointCloud
+from ..utils.pointcloud_utils import normalize_mat, get_border_indices
+from .gpr_on_point_cloud import rbf_manifold_kernel, GPROnPointCloud
 
 
 class DensityEstimator:

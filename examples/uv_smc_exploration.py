@@ -24,11 +24,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device: ", device)
 torch.set_default_device(device)
 
-import config
-from exploration_base import ExplorationWithGP
-from plotting_utils import *
-from pointcloud_utils import *
-from pcloud_uv_smc_common import (
+import sys
+sys.path.insert(0, '..')
+
+from tactile_ergodic.utils import config
+from tactile_ergodic.exploration import ExplorationWithGP
+from tactile_ergodic.utils.plotting_utils import *
+from tactile_ergodic.utils.pointcloud_utils import *
+from tactile_ergodic.exploration.ergodic_control_uv import (
     ErgodicControlUV,
     compute_uv_parameterization_pca,
     create_uv_interpolator,

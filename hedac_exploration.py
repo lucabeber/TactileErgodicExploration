@@ -70,54 +70,49 @@ def hedac(agent, param, pcloud):
     # Array to store 3D speeds at each timestep
     speed_arr = np.zeros(param.timesteps)
 
-    # Initialize goal density
+    # ===================================================================
+    # INITIALIZATION: Create online GP model for density estimation
+    # ===================================================================
+    # 1. Sample ground truth density at agent's initial position
     sample_points = torch.tensor(agent.x, dtype=torch.float32).reshape(1, -1)
-    # Make prediction
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
         gpr_original_density = likelihood_real(model_real(sample_points))
-
     density_sample = gpr_original_density.mean
-    # print(stiffness_sample)
-    # Construct training data
+
+    # 2. Initialize online GP with this single sample
     train_x = sample_points.clone()
     train_y = density_sample.clone()
-    print(train_x)
-    print(train_y)
 
-    # Initialize the likelihood and model
     likelihood = gpytorch.likelihoods.GaussianLikelihood()
     model = GPROnPointCloud(train_x, train_y, likelihood, km, pcloud.vertices)
-
-    # set to training mode and train
     model.train()
     likelihood.train()
-
-    # Get into evaluation (predictive posterior) mode and predict
     model.eval()
     likelihood.eval()
 
+    # 3. Predict on full point cloud to get initial goal density
     test_x = torch.tensor(pcloud.vertices, dtype=torch.float32, device=device)
-
     with torch.no_grad(), gpytorch.settings.fast_pred_var():
         observed_pred = likelihood(model(test_x))
 
     goal_density = observed_pred.mean.cpu().numpy()
-
-    # we normalize the goal because it should be a probability distribution
-    goal_density = normalize_mat(goal_density)
+    goal_density = normalize_mat(goal_density)  # Normalize to probability distribution
     mean_tmp = normalize_mat(observed_pred.mean.cpu().numpy())
-    ut = np.array(goal_density)
+    ut = np.array(goal_density)  # Heat equation state
 
     # we keep this and add coverage at each timestep on top of it
     coverage = np.zeros_like(goal_density)
 
-    # fig.show("browser")
     # for keeping the runtime of each timestep
     time_arr = np.zeros(param.timesteps)
 
-    agent.t = 0  # reset the agent's time
-    # do absolute minimum inside the main loop
+    agent.t = 0
+
+    # ===================================================================
+    # MAIN EXPLORATION LOOP
+    # ===================================================================
     for t in range(param.timesteps):
+        # 1. Get neighbors around agent's current position
         dists, neighbor_ids, neighbor_coords = get_pcloud_neighbors(
             pcloud.pcd_tree,
             pcloud.vertices,
@@ -127,10 +122,11 @@ def hedac(agent, param, pcloud):
             param.nb_minimum_neighbors,
         )
 
-        # Compute the coverage using RBF kernel
+        # 2. Update coverage map (RBF kernel around agent)
         kernel_vals = np.exp(-(1 / agent.radius) * dists**2)
         coverage[neighbor_ids] += kernel_vals
 
+        # 3. Compute heat equation source term
         neighbor_ids = neighbor_ids[: param.nb_minimum_neighbors]
         dists = dists[: param.nb_minimum_neighbors]
         neighbor_coords = pcloud.vertices[neighbor_ids, :]
@@ -138,31 +134,32 @@ def hedac(agent, param, pcloud):
         source = np.maximum(goal_density - coverage_density, 0) ** 2
         source = normalize_mat(source)
 
+        # 4. Evolve heat equation (one timestep)
         start_time = time.time()
-
         ut = pcloud.A_factorized.solve(pcloud.M @ ut)
         time_arr[t] = time.time() - start_time
-
         ut += param.source_strength * source
         ut[pcd_helper.is_boundary_arr] = 0
+
+        # 5. Compute gradient of heat field
         scalar_diffusion_solver.get_gradient(ut)
+
+        # 6. Project agent back to surface (keeps agent on manifold)
         (agent.x,) = get_gradient(
             np.copy(agent.x),
             neighbor_coords,
             neighbor_ids,
             ut,
         )
-        # Interpolate the gradient at the agent location using its closest 5 neighbors' values
+
+        # 7. Get gradient direction from heat field
         gradient = np.mean(
             scalar_diffusion_solver.gradient_ut_3d[neighbor_ids[:10]], axis=0
         )
 
-        # Store previous position before update
+        # 8. Move agent along gradient
         prev_x = np.copy(agent.x)
-
         agent.update(gradient)
-
-        # Calculate 3D speed (Euclidean distance traveled in this timestep)
         displacement = agent.x - prev_x
         speed_arr[t] = np.linalg.norm(displacement)
 
@@ -171,70 +168,46 @@ def hedac(agent, param, pcloud):
         goal_density_arr[..., t] = goal_density
         estimated_density_arr[..., t] = mean_tmp
 
+        # ===================================================================
+        # PERIODIC GP UPDATE: Every 50 timesteps, update density estimate
+        # ===================================================================
         if t % 50 == 0 and t > 0:
             print(f"Time step: {t}/{param.timesteps}")
-            # Update the goal density
-            # Extract the trajectory
+
+            # 1. Sample trajectory (every 5th point from 0 to t)
             sample_points = torch.tensor(
                 agent.x_arr[:t:5, :], dtype=torch.float32, device=device
             )
-            print(sample_points.shape)
-            # Make prediction
+
+            # 2. Get ground truth density at these points
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 gpr_original_density = likelihood_real(model_real(sample_points))
-
             density_sample = gpr_original_density.mean
 
-            # Construct training data
+            # 3. REPLACE online GP training data with full trajectory
             train_x = sample_points.clone()
             train_y = density_sample.clone()
-
-            # Training the model
             model.train()
             likelihood.train()
-
-            model.set_train_data(train_x, train_y, strict=False)
-
-            # Switch to evaluation mode
+            model.set_train_data(
+                train_x, train_y, strict=False
+            )  # Replace, don't append!
             model.eval()
             likelihood.eval()
 
+            # 4. Predict on full point cloud
             test_x = torch.tensor(pcloud.vertices, dtype=torch.float32)
-
             with torch.no_grad(), gpytorch.settings.fast_pred_var():
                 observed_pred = likelihood(model(test_x))
 
             var_tmp = normalize_mat(observed_pred.variance.cpu().numpy())
             mean_tmp = normalize_mat(observed_pred.mean.cpu().numpy())
 
-            # Set variance to zero along the borders of the point cloud
-            border_indices = get_border_indices(
-                pcloud.vertices, param.nb_boundary_neighbors
-            )
-
+            # 5. Compute new goal density (exploration + exploitation)
             goal_density = param.exploit_alpha * normalize_mat(
                 np.maximum(mean_tmp - np.mean(mean_tmp), 0)
             ) + (1 - param.exploit_alpha) * normalize_mat(var_tmp)
             goal_density = normalize_mat(goal_density)
-            # goal_density[border_indices] = 0
-            # plots = visualize_point_cloud(
-            #     pcloud.vertices,
-            #     colors=goal_density,
-            #     # colors=heat_arr[...,-1],
-            #     is_show_plot=False, point_size=5
-            # )
-            # fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
-            # fig.show()
-
-            # plots = visualize_point_cloud(
-            #     pcloud.vertices,
-            #     colors=heat_arr[...,t],
-            #     # colors=heat_arr[...,-1],
-            #     is_show_plot=False, point_size=5
-            # )
-            # fig = visualize_trajectory(agent.x_arr[:t,:], plots, color="black")
-
-            # fig.show()
 
     return (
         agent.x_arr,
@@ -246,174 +219,114 @@ def hedac(agent, param, pcloud):
     )
 
 
+# ===================================================================
+# MAIN SCRIPT: Setup and run exploration
+# ===================================================================
+
 # Select the object to explore
 obj_name = "bun270_X"  # Stanford bunny with X projected as the target
-# obj_name = "plate_shapes"  # random IKEA plate with hand-drawn shapes
-# obj_name = "cup_X" # random cup that we scanned with X projected as the target
-
-experiment_index = 2  # choose which initial position to use from x0_arr_10.npz
 
 
+# Parameters
 class param:
-    pass  # c-style struct
+    pass
 
 
-param.exploit_alpha = 0.6  # total simulation timesteps
-
-param.timesteps = 1500  # total simulation timesteps
-
-# tuning: [1,100] increasing alpha result in global exploration closer to SS
-# decreasing alpha result in local exploration lower limited
-param.alpha = 100
-
-param.method = "exact"
-
-# voxel filter size for downsampling the point cloud
+param.exploit_alpha = 0.6  # Balance: 0=pure exploration, 1=pure exploitation
+param.timesteps = 1500
+param.alpha = 100  # Heat equation parameter
 param.voxel_size = 0.002
-# radius for the agent footprint that'd be used in coverage
-param.agent_radius = 2.5 * param.voxel_size  # for the cup and the bunny
-# param.agent_radius = 5 * param.voxel_size  # for the plate
-# define speed and acceleration in terms of voxel size
+param.agent_radius = 2.5 * param.voxel_size
 param.max_velocity = 0.1 * param.voxel_size * 2
 param.max_acceleration = 1.0 * param.max_velocity * 2
-
-# tuning: doesn't have much effect on exploration so we keep it at 1
 param.source_strength = 1
-
-# max. num. of neighbors to consider for computing the neighbors in agent radius
 param.nb_max_neighbors = 500
-# num. of neighbors to consider for tangent space and gradient computation
 param.nb_minimum_neighbors = 20
-# num. of neighbors to consider for implicitly determining the boundary
-# setting this lower in bunny resutls in right ear considered as a seperate body
-# setting this higher in bunny results in the right ear being considered as part
-# of the main body
 param.nb_boundary_neighbors = 40
 
-
-# Select the object and load the point cloud
-# ==========================================
+# Load and process point cloud
 filename = config.get_point_cloud_path(f"{obj_name}.ply")
 pcloud = process_point_cloud(filename, param)
 pcd_helper = Pointcloud(pcloud.vertices)
 boundary_normals = pcd_helper.get_boundary_normals()
 
-u0 = np.zeros(len(pcloud.vertices))
-u0[pcd_helper.is_boundary_arr] = 1
 
+# Setup heat equation solver
 scalar_diffusion_solver = PointcloudScalarDiffusion(pcloud=pcd_helper)
-
 pcloud.C, pcloud.M = robust_laplacian.point_cloud_laplacian(
     pcloud.vertices, n_neighbors=param.nb_boundary_neighbors
 )
+A = csc_matrix(pcloud.M + pcloud.dt * pcloud.C)
+pcloud.A_factorized = splu(A)
 
-A = csc_matrix(pcloud.M + pcloud.dt * pcloud.C)  # Ensure sparse format
-pcloud.A_factorized = splu(A)  # LU factorization
+# ===================================================================
+# GROUND TRUTH GP MODEL: Represents the "unknown" density to explore
+# ===================================================================
+# This GP model simulates the unknown target distribution that the agent
+# is trying to learn through exploration. In a real tactile scenario, this
+# would be replaced by actual sensor readings.
 
+# GP hyperparameters
+l = 0.010  # Length scale
+sigma = 1.0  # Signal variance
+n_eig = 500  # Number of eigenfunctions for manifold kernel
 
-import os
-
-import gpytorch
-import matplotlib.cm as cm
-import matplotlib.pyplot as plt
-import open3d as o3d
-import torch
-
-# Define the goal density
-# ========================
-
-
-# Load gp on pc class
-# ====================
-l = 0.010
-sigma = 1.0
-n_eig = 500
+# Create RBF kernel adapted to the point cloud manifold
 km = rbf_manifold_kernel(pcloud.vertices, l, sigma, n_eig)
 
-# Construct training data
+# Train on full point cloud with target density (boundary = 1, interior = 0)
 train_x = torch.tensor(pcloud.vertices, dtype=torch.float32)
 train_y = torch.tensor(pcloud.u0, dtype=torch.float32)
 
-# Initialize the likelihood and model
 likelihood_real = gpytorch.likelihoods.GaussianLikelihood()
 model_real = GPROnPointCloud(train_x, train_y, likelihood_real, km, pcloud.vertices)
 
-# set to training mode and train
-model_real.train()
-likelihood_real.train()
-
-
+# Set to evaluation mode (no training needed for ground truth)
 model_real.eval()
 likelihood_real.eval()
 
-import time
-
-start = time.time()
+# Get the smoothed ground truth prediction (used for visualization)
 with torch.no_grad():
     observed_pred = likelihood_real(model_real(train_x))
-end = time.time()
-print(f"Time to predict: {end - start}")
 mean = observed_pred.mean.cpu().numpy()
-# var = observed_pred.variance.cpu().numpy()
 
-
-camera = dict(
-    up=dict(x=0, y=1, z=0), center=dict(x=0, y=0, z=0), eye=dict(x=0, y=0.7, z=1.25)
-)
-
-# plot = plot_point_cloud(train_x.cpu().numpy(), point_colors=mean)
-# fig = go.Figure(plot)
-# update_figure(fig)
-# fig.update_layout(scene_camera=camera)
-
-# fig.show("browser")
-
-# agent = SecondOrderAgent(
-#     x=np.zeros(3),
-#     max_velocity=param.max_velocity,
-#     max_acceleration=param.max_acceleration * 2,
-#     dim_t=param.timesteps,
-# )
-
+# ===================================================================
+# AGENT INITIALIZATION
+# ===================================================================
 agent = FirstOrderAgent(
     x=np.zeros(3),
     dim_t=param.timesteps,
     max_velocity=param.max_velocity,
 )
 
-random_vertex = np.random.randint(0, len(pcloud.vertices))
-# agent.x = pcloud.vertices[810]
+# Set agent starting position (vertex 1500)
 agent.x = pcloud.vertices[1500]
 agent.radius = param.agent_radius
 
-# plots = visualize_gradient_field(
-#     pcloud.vertices[pcd_helper.is_boundary_arr],
-#     boundary_normals,
-#     sizeref=10,
-# )
-# fig = go.Figure(plots)
-# fig.show("browser")
-
+# ===================================================================
+# RUN HEDAC EXPLORATION
+# ===================================================================
 x_arr, heat_arr, coverage_arr, time_arr, goal_arr, estimated_density_arr = hedac(
     agent, param, pcloud
 )
 
 
+# ===================================================================
+# VISUALIZATION AND OUTPUT
+# ===================================================================
+
+# Static plot: Final estimated density with trajectory
+print("\nGenerating visualizations...")
 plots = visualize_point_cloud(
     pcloud.vertices,
-    colors=estimated_density_arr[..., -1],
-    # colors=heat_arr[...,-1],
+    colors=estimated_density_arr[..., -1],  # Final estimated density
     is_show_plot=False,
     point_size=5,
 )
 fig = visualize_trajectory(x_arr[:, :], plots, color="black")
-
 fig.show("browser")
 
-# Generate animated visualizations
-print("\nGenerating animated visualizations...")
-
-# Animation 1: Trajectory evolution with goal density (what the agent is exploring)
+# Animation 1: Goal density evolution (what the agent is trying to explore)
 print("Creating goal density animation...")
 goal_html_path = config.get_animation_path(f"ergodic_goal_density_{obj_name}.html")
 animate_trajectory_pcloud(
@@ -425,8 +338,8 @@ animate_trajectory_pcloud(
 )
 print(f"Goal density animation saved to {goal_html_path}")
 
-# Animation 2: Trajectory evolution with estimated density (what the agent learned)
-print("\nCreating estimated density animation...")
+# Animation 2: Estimated density evolution (what the agent learned)
+print("Creating estimated density animation...")
 est_html_path = config.get_animation_path(f"ergodic_estimated_density_{obj_name}.html")
 animate_trajectory_pcloud(
     x_arr=x_arr,
@@ -436,12 +349,8 @@ animate_trajectory_pcloud(
     save_path=str(est_html_path),
 )
 print(f"Estimated density animation saved to {est_html_path}")
-print("Animation opened in browser!")
 
-# --- Example usage ---
-# Choose 5 steps to visualise
-steps_to_plot = [0, 100, 500, 1000, 2000]
-
+# Static plot: Distribution evolution over time
 plot_distribution_evolution_column_auto(
     vertices=pcloud.vertices,
     original_density=mean,
@@ -449,3 +358,5 @@ plot_distribution_evolution_column_auto(
     pdf_name=str(config.get_plot_path(f"distribution_evolution_{obj_name}.pdf")),
     agent_trajectory=x_arr[:, :],
 )
+
+print("\nExploration complete!")
