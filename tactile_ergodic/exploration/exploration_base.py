@@ -9,9 +9,10 @@ Copyright (c) 2024 Idiap Research Institute, http://www.idiap.ch/
 Written by Cem Bilaloglu <cem.bilaloglu@idiap.ch>
 """
 
+from abc import ABC, abstractmethod
+
 import numpy as np
 import torch
-from abc import ABC, abstractmethod
 
 from ..estimation.density_estimator import create_density_estimator
 from ..utils.pointcloud_utils import process_point_cloud
@@ -61,6 +62,7 @@ class ExplorationWithGP(ABC):
             additional_params: Dictionary with additional parameters specific
                              to the exploration method (e.g., alpha for HEDAC)
         """
+
         # Create parameter object for process_point_cloud
         class param:
             pass

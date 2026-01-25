@@ -10,12 +10,10 @@ This script:
 Copyright notice follows the original ergodic_control_SMC_2D.py
 """
 
-from pathlib import Path
-
 import numpy as np
 import open3d as o3d
 
-from pcloud_uv_smc_common import (
+from tactile_ergodic.exploration.ergodic_control_uv import (
     ErgodicControlUV,
     compute_fourier_coefficients_from_red_channel,
     compute_uv_parameterization_pca,
@@ -24,12 +22,13 @@ from pcloud_uv_smc_common import (
     project_uv_to_surface,
     setup_fourier_basis,
 )
-from pointcloud_utils import process_point_cloud
+from tactile_ergodic.utils.pointcloud_utils import process_point_cloud
+from tactile_ergodic.utils import config
 
 # Parameters
 # ===============================
 nbData = 500  # Number of datapoints
-nbFct = 50  # Number of basis functions along x and y
+nbFct = 30  # Number of basis functions along x and y
 nbVar = 2  # Dimension of datapoints (2D parameterization)
 nbGaussian = 2  # Number of Gaussians to represent the spatial distribution
 sp = (nbVar + 1) / 2  # Sobolev norm parameter
@@ -45,9 +44,8 @@ u_max_3d = 1 * voxel_size * 2  # Limit 3D speed based on voxel size
 x0 = [0.4, 0.6]
 nbRes = 100
 
-BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_POINT_CLOUD = BASE_DIR / "bun270_X.ply"
-# DEFAULT_POINT_CLOUD = BASE_DIR / "plate_shapes.ply"
+DEFAULT_POINT_CLOUD = config.get_point_cloud_path("bun270_X.ply")
+# DEFAULT_POINT_CLOUD = config.get_point_cloud_path("plate_shapes.ply")
 
 # Load and process point cloud
 # ===============================
@@ -71,10 +69,17 @@ print(f"Point cloud processed: {len(points)} points")
 # Compute UV parameterization
 # ===============================
 print("Computing UV parameterization...")
-# Option 1: Use PCA-based parameterization (better for arbitrary surfaces)
+
+# Choose one of the following parameterization methods:
+
+# Option 1: PCA - Fast, simple projection (current default)
 uv_coords, points_3d = compute_uv_parameterization_pca(points)
-# Option 2: Use XY projection (simpler, good for height-field-like surfaces)
+
+# Option 2: XY projection - Simplest, good for height-field-like surfaces
 # uv_coords, points_3d = compute_uv_parameterization_xy(points)
+
+# Note: Other parameterization methods (Isomap, LLE, MDS, Spectral) are not yet implemented
+# in the tactile_ergodic package. Only PCA and XY methods are currently available.
 
 print(f"UV coordinates computed: range [{uv_coords.min():.3f}, {uv_coords.max():.3f}]")
 
@@ -138,7 +143,7 @@ ergodic_control = ErgodicControlUV(
     linear_interp=linear_interp,
     nearest_interp=nearest_interp,
     phim=phim,
-    enable_3d_speed_control=True,  # Disabled to check if it causes wiggles
+    enable_3d_speed_control=False,  # Disabled to check if it causes wiggles
     debug=True,
 )
 
@@ -267,7 +272,7 @@ fig.add_trace(
         y=points_3d[:, 1],
         z=points_3d[:, 2],
         mode="markers",
-        marker=dict(size=1, color=color_values, colorscale="Plasma", opacity=0.7),
+        marker=dict(size=2, color=color_values, colorscale="Viridis", opacity=0.3),
         name="Point Cloud",
         showlegend=False,
     ),
@@ -280,7 +285,7 @@ fig.add_trace(
         y=r_x_3d[1, :],
         z=r_x_3d[2, :],
         mode="lines",
-        line=dict(color="red", width=3),
+        line=dict(color="red", width=5),
         name="Trajectory",
         showlegend=False,
     ),
@@ -387,14 +392,145 @@ fig.update_layout(
 )
 
 # Save and show
-fig.write_html("pointcloud_ergodic_control_results_plotly.html")
-print("Results saved to 'pointcloud_ergodic_control_results_plotly.html'")
+output_html = str(config.get_animation_path("pointcloud_ergodic_control_results_plotly.html"))
+fig.write_html(output_html)
+print(f"Results saved to '{output_html}'")
+
+# Save individual plots as PDF (excluding 3D point cloud)
+print("Saving individual plots as PDF...")
+
+# 1. UV space trajectory
+fig_uv = go.Figure()
+fig_uv.add_trace(
+    go.Contour(
+        z=G,
+        x=X[0, :],
+        y=Y[:, 0],
+        colorscale="Viridis",
+        showscale=False,
+        contours=dict(coloring="heatmap"),
+    )
+)
+fig_uv.add_trace(
+    go.Scatter(
+        x=r_x_uv[0, :],
+        y=r_x_uv[1, :],
+        mode="lines",
+        line=dict(color="red", width=2),
+        showlegend=False,
+    )
+)
+fig_uv.add_trace(
+    go.Scatter(
+        x=[r_x_uv[0, 0]],
+        y=[r_x_uv[1, 0]],
+        mode="markers",
+        marker=dict(size=10, color="white", line=dict(color="black", width=2)),
+        showlegend=False,
+    )
+)
+fig_uv.add_trace(
+    go.Scatter(
+        x=[r_x_uv[0, -1]],
+        y=[r_x_uv[1, -1]],
+        mode="markers",
+        marker=dict(
+            size=10, color="red", symbol="square", line=dict(color="black", width=2)
+        ),
+        showlegend=False,
+    )
+)
+fig_uv.update_xaxes(title_text="U")
+fig_uv.update_yaxes(title_text="V", scaleanchor="x", scaleratio=1)
+fig_uv.update_layout(title_text="Trajectory in UV Space", width=600, height=600)
+fig_uv.write_image(str(config.get_plot_path("trajectory_uv.pdf")))
+
+# 2. Desired Fourier coefficients
+fig_w_hat = go.Figure()
+fig_w_hat.add_trace(
+    go.Heatmap(
+        z=np.reshape(w_hat, [nbFct, nbFct]).T,
+        colorscale="Gray_r",
+        showscale=False,
+    )
+)
+fig_w_hat.update_xaxes(showticklabels=False)
+fig_w_hat.update_yaxes(showticklabels=False)
+fig_w_hat.update_layout(
+    title_text="Desired Fourier coefficients w_hat", width=500, height=500
+)
+fig_w_hat.write_image(str(config.get_plot_path("desired_coefficients.pdf")))
+
+# 3. Reproduced Fourier coefficients
+fig_w = go.Figure()
+fig_w.add_trace(
+    go.Heatmap(
+        z=np.reshape(r_w[:, -1], [nbFct, nbFct]).T,
+        colorscale="Gray_r",
+        showscale=False,
+    )
+)
+fig_w.update_xaxes(showticklabels=False)
+fig_w.update_yaxes(showticklabels=False)
+fig_w.update_layout(
+    title_text="Reproduced Fourier coefficients w", width=500, height=500
+)
+fig_w.write_image(str(config.get_plot_path("reproduced_coefficients.pdf")))
+
+# 4. Reconstruction error over time
+fig_error = go.Figure()
+fig_error.add_trace(
+    go.Scatter(
+        x=np.arange(len(r_e)),
+        y=r_e,
+        mode="lines",
+        line=dict(color="blue", width=2),
+        showlegend=False,
+    )
+)
+fig_error.update_xaxes(title_text="Iteration")
+fig_error.update_yaxes(title_text="Error")
+fig_error.update_layout(
+    title_text="Reconstruction Error over Time", width=600, height=500
+)
+fig_error.write_image(str(config.get_plot_path("reconstruction_error.pdf")))
+
+# 5. UV parameterization
+fig_uv_param = go.Figure()
+fig_uv_param.add_trace(
+    go.Scatter(
+        x=uv_coords[:, 0],
+        y=uv_coords[:, 1],
+        mode="markers",
+        marker=dict(size=3, color=points_3d[:, 2], colorscale="RdBu", opacity=0.5),
+        showlegend=False,
+    )
+)
+fig_uv_param.add_trace(
+    go.Scatter(
+        x=r_x_uv[0, :],
+        y=r_x_uv[1, :],
+        mode="lines",
+        line=dict(color="red", width=2),
+        showlegend=False,
+    )
+)
+fig_uv_param.update_xaxes(title_text="U")
+fig_uv_param.update_yaxes(title_text="V", scaleanchor="x", scaleratio=1)
+fig_uv_param.update_layout(
+    title_text="UV Parameterization (colored by Z)", width=600, height=600
+)
+fig_uv_param.write_image(str(config.get_plot_path("uv_parameterization.pdf")))
+
+print("Individual plots saved as PDF files")
+
 fig.show("browser")
 
 # Save trajectory data
 # ===============================
+npz_path = str(config.get_data_path("pointcloud_trajectory.npz"))
 np.savez(
-    "pointcloud_trajectory.npz",
+    npz_path,
     trajectory_uv=r_x_uv,
     trajectory_3d=r_x_3d,
     reconstruction_error=r_e,
@@ -402,4 +538,4 @@ np.savez(
     points_3d=points_3d,
     distribution=g,
 )
-print("Trajectory data saved to 'pointcloud_trajectory.npz'")
+print(f"Trajectory data saved to '{npz_path}'")

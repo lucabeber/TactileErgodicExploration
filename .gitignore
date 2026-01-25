@@ -12,3 +12,4 @@ __pycache__
 bags/
 results/
 data/
+*.egg-info/
