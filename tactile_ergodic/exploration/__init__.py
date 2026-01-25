@@ -2,10 +2,14 @@
 
 # Base classes
 from .pointcloud_exploration import PointcloudExploration
-from .exploration_base import ExplorationWithGP
+from .exploration_base import ExplorationWithGP  # Legacy, kept for compatibility
+from .estimation_mixin import ExplorationWithEstimation
 
 # Pure exploration algorithms (no GP estimation)
 from .hedac import PointcloudHEDAC
+
+# Exploration with GP estimation
+from .hedac_estimation import HEDACEstimation
 
 # Laplacian SMC components
 from .laplacian_smc import (
@@ -25,9 +29,12 @@ from .ergodic_control_uv import (
 __all__ = [
     # Base classes
     "PointcloudExploration",
-    "ExplorationWithGP",
+    "ExplorationWithGP",  # Legacy
+    "ExplorationWithEstimation",
     # Pure exploration
     "PointcloudHEDAC",
+    # Exploration with estimation
+    "HEDACEstimation",
     # Laplacian SMC
     "LaplacianSMCController",
     "compute_laplacian_eigenpairs",
