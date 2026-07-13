@@ -30,18 +30,18 @@ def multivariate_gaussian(x, y, z=0):
     cov1 = np.array([[0.0001, 0.0], [0.0, 0.0001]])
     mean2 = np.array([0.27, 0.08])
     cov2 = np.array([[0.0001, 0.0], [0.0, 0.0001]])
-    w1 = 40.0
-    w2 = 50.0
+    w1 = 50.0
+    w2 = 40.0
     x = np.array([x, y]).transpose()
     # Calculate the probability density function (PDF) for each Gaussian
     return (
         w1 * mvn.pdf(x, mean1, cov1) / mvn.pdf(mean1, mean1, cov1)
         + w2 * mvn.pdf(x, mean2, cov2) / mvn.pdf(mean2, mean2, cov2)
-        + 40
+        + 90
     )
 
 
-def hedac(agent, param, pcloud, update_interval=50):
+def hedac(agent, param, pcloud, update_interval=250):
     """
     Perform HEDAC exploration using the agent and the point cloud.
 
@@ -264,7 +264,7 @@ point_cloud_dir = "point_clouds/"
 
 # obj_name = "bun270_X" # Stanford bunny with X projected as the target
 obj_name = (
-    "processed_pointcloud_405"  # random IKEA plate with hand-drawn shapes
+    "hole"  # random IKEA plate with hand-drawn shapes
 )
 # obj_name = "cup_X" # random cup that we scanned with X projected as the target
 
@@ -275,9 +275,9 @@ class param:
     pass  # c-style struct
 
 
-param.exploit_alpha = 0.6  # total simulation timesteps
+param.exploit_alpha = 0.5  # total simulation timesteps
 
-param.timesteps = 40000  # total simulation timesteps
+param.timesteps = 80000  # total simulation timesteps
 
 # tuning: [1,100] increasing alpha result in global exploration closer to SS
 # decreasing alpha result in local exploration lower limited
@@ -288,11 +288,11 @@ param.method = "exact"
 # voxel filter size for downsampling the point cloud
 param.voxel_size = 0.0015
 # radius for the agent footprint that'd be used in coverage
-param.agent_radius = 2.5 * param.voxel_size # for the cup and the bunny
+param.agent_radius =0.0025
 # param.agent_radius = 5 * param.voxel_size  # for the plate
 # define speed and acceleration in terms of voxel size
-param.max_velocity = 0.005
-param.max_acceleration = 0.0025
+param.max_velocity = 0.004
+param.max_acceleration = 0.002
 
 # tuning: doesn't have much effect on exploration so we keep it at 1
 param.source_strength = 1
@@ -342,7 +342,7 @@ import torch
 
 # Load gp on pc class
 # ====================
-l = 0.005
+l = 0.0025
 sigma = 1.0
 n_eig = 500
 km = rbf_manifold_kernel(pcloud.vertices, l, sigma, n_eig)
@@ -372,7 +372,7 @@ agent = SecondOrderAgent(
     max_velocity=param.max_velocity,
     max_acceleration=param.max_acceleration * 2,
     dim_t=param.timesteps,
-    dt=0.01
+    dt=0.002
 )
 
 # agent = FirstOrderAgent(
@@ -395,7 +395,7 @@ agent.radius = param.agent_radius
 # fig.show("browser")
 
 # Run HEDAC with different alpha values
-alphas = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]
+alphas = [0.5]
 results = {}
 
 results = {alpha: {'ergodic_metrics': [], 'rmses': [], 'stop_times': []} for alpha in alphas}
@@ -407,21 +407,21 @@ for alpha_val in alphas:
 
     param.exploit_alpha = alpha_val
 
-    for sim in range(50):  # Run 3 simulations for each alpha
+    for sim in range(1):  # Run 3 simulations for each alpha
         # Reset agent for each run
         agent = SecondOrderAgent(
             x=np.zeros(3),
             max_velocity=param.max_velocity,
             max_acceleration=param.max_acceleration * 2,
             dim_t=param.timesteps,
-            dt=0.01
+            dt=0.002
         )
         random_vertex = np.random.randint(0, len(pcloud.vertices))
         agent.x = pcloud.vertices[random_vertex]
         agent.radius = param.agent_radius
 
         x_arr, heat_arr, coverage_arr, time_arr, goal_arr, estimated_density_arr, stop_t, stopped = hedac(
-            agent, param, pcloud, update_interval=50
+            agent, param, pcloud, update_interval=500
         )
 
         # Compute ergodic metric (coverage-goal density difference)
